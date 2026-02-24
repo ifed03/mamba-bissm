@@ -23,7 +23,8 @@ def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_gr
         optimizer.zero_grad()
         with torch.autocast(device_type=device.type, enabled=scaler is not None):
             logit, _ = model(x)
-            loss = criterion(logit, y)
+            loss = criterion(logit, y.to(logit.device))
+
         if scaler is None:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
