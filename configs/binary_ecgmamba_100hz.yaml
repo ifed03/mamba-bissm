@@ -25,7 +25,7 @@ model:
   use_layernorm: true
   use_ffn: true
 training:
-  batch_size: 64
+  batch_size: 32
   epochs: 50
   lr: 0.001
   weight_decay: 0.05
@@ -33,6 +33,7 @@ training:
   patience: 10
   grad_clip: 1.0
   mixed_precision: true
+  accumulation_steps: 2
   weighted_sampler: false
   deterministic: true
 eval:
