@@ -1,0 +1,29 @@
+paths:
+  data_path: data/cpsc_2018_labeled_single_lead.parquet
+  splits_dir: splits/
+  runs_dir: runs/
+split:
+  method: holdout
+  seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+preprocessing:
+  fs_target: 500
+  target_seconds: 10.0
+  normalize: zscore
+model:
+  name: cnn
+  channels: [32, 64, 128]
+training:
+  batch_size: 64
+  epochs: 50
+  lr: 0.001
+  weight_decay: 0.05
+  warmup_ratio: 0.05
+  patience: 10
+  grad_clip: 1.0
+  mixed_precision: true
+  weighted_sampler: false
+  deterministic: true
+evaluate:
+  tsne: false
