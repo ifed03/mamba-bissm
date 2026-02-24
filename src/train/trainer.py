@@ -21,8 +21,10 @@ def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_gr
     for b in tqdm(loader, leave=False):
         x, y = b["x"].to(device), b["y"].to(device)
         optimizer.zero_grad()
+        
         with torch.autocast(device_type=device.type, enabled=scaler is not None):
             logit, _ = model(x)
+            print(f"Logit: {logit.device} | Target: {y.device} | Criterion: {next(criterion.parameters(), 'No params').device if list(criterion.parameters()) else 'No params'}")
             loss = criterion(logit, y.to(logit.device))
 
         if scaler is None:
@@ -45,7 +47,7 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
 
     y_train = np.array([train_loader.dataset.labels[i] for i in train_loader.dataset.indices])
     pos_weight = (len(y_train) - y_train.sum()) / max(y_train.sum(), 1)
-    criterion = make_bce_loss(float(pos_weight))
+    criterion = make_bce_loss(float(pos_weight)).to(device)
 
     opt = AdamW(model.parameters(), lr=cfg["training"]["lr"], weight_decay=cfg["training"]["weight_decay"])
     total_steps = cfg["training"]["epochs"] * len(train_loader)
