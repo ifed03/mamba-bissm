@@ -23,8 +23,7 @@ def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_gr
         optimizer.zero_grad()
         with torch.autocast(device_type=device.type, enabled=scaler is not None):
             logit, _ = model(x)
-            # Keep targets on the same device as model outputs to avoid CUDA/CPU mismatch errors.
-            loss = criterion(logit, y.to(logit.device))
+            loss = criterion(logit, y)
         if scaler is None:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
@@ -45,7 +44,7 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
 
     y_train = np.array([train_loader.dataset.labels[i] for i in train_loader.dataset.indices])
     pos_weight = (len(y_train) - y_train.sum()) / max(y_train.sum(), 1)
-    criterion = make_bce_loss(float(pos_weight), device=device)
+    criterion = make_bce_loss(float(pos_weight))
 
     opt = AdamW(model.parameters(), lr=cfg["training"]["lr"], weight_decay=cfg["training"]["weight_decay"])
     total_steps = cfg["training"]["epochs"] * len(train_loader)
