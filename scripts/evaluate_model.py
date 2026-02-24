@@ -2,7 +2,10 @@
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
+src_path = str(Path(__file__).resolve().parents[1] / "src")
+if src_path not in sys.path:
+    sys.path.insert(0, src_path) # .insert(0, ...) puts it at the front of the search list
+
 import argparse
 from pathlib import Path
 
@@ -11,8 +14,8 @@ import torch
 
 from data.datamodule import make_dataloaders
 from data.splits import load_split
-from eval.evaluator import evaluate
-from eval.plots import save_plots
+from evaluate.evaluator import evaluate
+from evaluate.plots import save_plots
 from models.cnn_baseline import CNNBaseline
 from models.ecgmamba import ECGMamba
 from train.checkpointing import load_checkpoint

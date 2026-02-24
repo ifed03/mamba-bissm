@@ -2,7 +2,11 @@
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
+# Adds 'src' to path so 'data', 'models', and 'train' (the folder) are accessible
+src_path = str(Path(__file__).resolve().parents[1] / "src")
+if src_path not in sys.path:
+    sys.path.insert(0, src_path) # .insert(0, ...) puts it at the front of the search list
+
 import argparse
 from pathlib import Path
 

@@ -6,8 +6,8 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
-from eval.evaluator import predict
-from eval.plots import save_plots
+from evaluate.evaluator import predict
+from evaluate.plots import save_plots
 from train.checkpointing import save_checkpoint
 from train.losses import make_bce_loss
 from train.lr_schedule import cosine_with_warmup
