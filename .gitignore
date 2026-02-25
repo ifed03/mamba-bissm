@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+# Runs - saving trained models is large
+runs/
+*.ckpt
+*.npz
+
 # Distribution / packaging
 .Python
 build/
