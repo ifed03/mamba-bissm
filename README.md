@@ -30,7 +30,7 @@ python scripts/train.py --config configs/binary_ecgmamba_100hz.yaml
 
 ## Evaluate
 ```bash
-python scripts/eval.py --config configs/binary_ecgmamba_100hz.yaml --ckpt runs/<run_name>/best.ckpt
+python scripts/evaluate_model.py --config configs/binary_ecgmamba_100hz.yaml --ckpt runs/<run_name>/best.ckpt
 ```
 
 ## Sweep (baseline + ECGMamba + ablations via config toggles)
