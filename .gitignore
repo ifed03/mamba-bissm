@@ -11,6 +11,11 @@ runs/
 *.ckpt
 *.npz
 
+# Data boundaries
+data/raw/
+data/interim/
+data/processed/
+
 # Distribution / packaging
 .Python
 build/

@@ -18,7 +18,7 @@ if __name__ == "__main__":
     rows = []
     for cfg in args.configs:
         run_name = Path(cfg).stem
-        subprocess.run(["python", "scripts/train.py", "--config", cfg, "--run-name", run_name], check=True)
+        subprocess.run(["python", "scripts/train_model.py", "--config", cfg, "--run-name", run_name], check=True)
         metrics_path = Path("runs") / run_name / "metrics.json"
         import json
 
