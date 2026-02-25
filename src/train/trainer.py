@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
@@ -21,10 +22,9 @@ def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_gr
     for b in tqdm(loader, leave=False):
         x, y = b["x"].to(device), b["y"].to(device)
         optimizer.zero_grad()
-        
+
         with torch.autocast(device_type=device.type, enabled=scaler is not None):
             logit, _ = model(x)
-            print(f"Logit: {logit.device} | Target: {y.device} | Criterion: {next(criterion.parameters(), 'No params').device if list(criterion.parameters()) else 'No params'}")
             loss = criterion(logit, y.to(logit.device))
 
         if scaler is None:
@@ -41,6 +41,18 @@ def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_gr
     return float(np.mean(losses))
 
 
+def _save_predictions(path: Path, record_ids, y_true, y_prob, split: str):
+    df = pd.DataFrame(
+        {
+            "record_id": list(record_ids),
+            "y_true": np.array(y_true).astype(int),
+            "y_prob": np.array(y_prob),
+            "split": split,
+        }
+    )
+    df.to_parquet(path, index=False)
+
+
 def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -48,6 +60,11 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     y_train = np.array([train_loader.dataset.labels[i] for i in train_loader.dataset.indices])
     pos_weight = (len(y_train) - y_train.sum()) / max(y_train.sum(), 1)
     criterion = make_bce_loss(float(pos_weight)).to(device)
+
+    checkpoints_dir = run_dir / "checkpoints"
+    plots_dir = run_dir / "plots"
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    plots_dir.mkdir(parents=True, exist_ok=True)
 
     opt = AdamW(model.parameters(), lr=cfg["training"]["lr"], weight_decay=cfg["training"]["weight_decay"])
     total_steps = cfg["training"]["epochs"] * len(train_loader)
@@ -57,6 +74,7 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     scaler = torch.amp.GradScaler("cuda") if amp else None
 
     best_auc, best_epoch, bad = -1.0, -1, 0
+    best_ckpt_path = checkpoints_dir / "best.ckpt"
     for epoch in range(cfg["training"]["epochs"]):
         tr_loss = _run_epoch(model, train_loader, opt, criterion, device, scaler, cfg["training"]["grad_clip"])
         sched.step()
@@ -65,23 +83,38 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
         vm = compute_metrics(yv, pv, thr)
         if vm["auroc"] > best_auc:
             best_auc, best_epoch, bad = vm["auroc"], epoch, 0
-            save_checkpoint(run_dir / "best.ckpt", model, opt, epoch, best_auc)
-            np.savez(run_dir / "preds_val.npz", y=yv, p=pv)
+            save_checkpoint(best_ckpt_path, model, opt, epoch, best_auc)
             save_json(run_dir / "best_val_metrics.json", {"epoch": epoch, "train_loss": tr_loss, "threshold": thr, **vm})
         else:
             bad += 1
         if bad >= cfg["training"]["patience"]:
             break
 
-    ckpt = torch.load(run_dir / "best.ckpt", map_location=device)
+    ckpt = torch.load(best_ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model"])
+
     yv, pv, _ = predict(model, val_loader, device)
     thr = choose_threshold_max_f1(yv, pv)
-    tm, yt, pt = None, None, None
     yt, pt, feats = predict(model, test_loader, device)
+
+    _save_predictions(
+        run_dir / "preds_val.parquet",
+        [val_loader.dataset.record_ids[i] for i in val_loader.dataset.indices],
+        yv,
+        pv,
+        "val",
+    )
+    _save_predictions(
+        run_dir / "preds.parquet",
+        [test_loader.dataset.record_ids[i] for i in test_loader.dataset.indices],
+        yt,
+        pt,
+        "test",
+    )
+    np.savez(run_dir / "preds_test_features.npz", feats=feats)
+
     tm = compute_metrics(yt, pt, thr)
-    np.savez(run_dir / "preds_test.npz", y=yt, p=pt, feats=feats)
-    save_plots(run_dir, yt, pt, thr)
+    save_plots(plots_dir, yt, pt, thr)
     out = {"best_epoch": best_epoch, "best_val_auroc": best_auc, "threshold": thr, "test": tm}
     save_json(run_dir / "metrics.json", out)
     return out

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 # Adjust this path to where your folds are saved
-fold_dir = Path("./splits/kfold_10")
+fold_dir = Path("./splits/kfold10_seed42")
 test_sets = []
 
 for f in fold_dir.glob("fold_*.json"):

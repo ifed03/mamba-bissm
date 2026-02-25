@@ -30,12 +30,12 @@ if __name__ == "__main__":
     cfg = load_config(args.config)
     set_seed(cfg["split"]["seed"], cfg["training"].get("deterministic", True))
 
-    split_path = args.split or str(Path(cfg["paths"]["splits_dir"]) / f"seed_{cfg['split']['seed']}" / "split.json")
+    split_path = args.split or str(Path(cfg["paths"]["splits_dir"]) / f"holdout_seed{cfg['split']['seed']}" / "split.json")
     split = load_split(split_path)
     train_loader, val_loader, test_loader = make_dataloaders(cfg, split)
 
     model = ECGMamba(cfg) if cfg["model"]["name"] == "ecgmamba" else CNNBaseline(cfg)
-    run_dir = make_run_dir(cfg["paths"]["runs_dir"], args.run_name)
-    save_config(run_dir / "config.yaml", cfg)
+    run_dir = make_run_dir(cfg["paths"]["runs_dir"], args.run_name, cfg)
+    save_config(run_dir / "config_resolved.yaml", cfg)
     metrics = train_model(model, train_loader, val_loader, test_loader, cfg, run_dir)
     print(metrics)

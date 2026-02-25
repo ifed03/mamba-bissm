@@ -24,7 +24,7 @@ if __name__ == "__main__":
     if args.kfold > 1:
         folds = make_kfold_splits(data_path, args.kfold, seed)
         for i, fold in enumerate(folds):
-            save_split(splits_dir / f"kfold_{args.kfold}" / f"fold_{i}.json", fold)
+            save_split(splits_dir / f"kfold{args.kfold}_seed{seed}" / f"fold_{i}.json", fold)
     else:
         split = make_holdout_splits(data_path, seed, cfg["split"]["train_ratio"], cfg["split"]["val_ratio"])
-        save_split(splits_dir / f"seed_{seed}" / "split.json", split)
+        save_split(splits_dir / f"holdout_seed{seed}" / "split.json", split)
