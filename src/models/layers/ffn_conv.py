@@ -1,5 +1,7 @@
 import torch.nn as nn
 
+# refines features channel-wise
+# feed-forward sublayer implemented with 1D convolutions instead of linear layers
 
 class ConvFFN(nn.Module):
     def __init__(self, d_model: int, hidden_mult: int = 4, kernel_size: int = 1, dropout: float = 0.1):

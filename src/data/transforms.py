@@ -17,13 +17,17 @@ class ECGPreprocessor:
     def __init__(self, cfg: TransformConfig):
         self.cfg = cfg
 
+    @property
+    def target_length(self) -> int:
+        return int(self.cfg.target_seconds * self.cfg.fs_target)
+
     def _resample(self, x: np.ndarray, fs_source: int) -> np.ndarray:
         if fs_source == self.cfg.fs_target:
             return x.astype(np.float32)
         return resample_poly(x, up=self.cfg.fs_target, down=fs_source).astype(np.float32)
 
-    def _crop_pad(self, x: np.ndarray) -> np.ndarray:
-        target_len = int(self.cfg.target_seconds * self.cfg.fs_target)
+    def _crop_pad(self, x: np.ndarray, target_len: int | None = None) -> np.ndarray:
+        target_len = self.target_length if target_len is None else int(target_len)
         if len(x) > target_len:
             start = np.random.randint(0, len(x) - target_len + 1) if self.cfg.random_crop else (len(x) - target_len) // 2
             x = x[start : start + target_len]
@@ -42,9 +46,15 @@ class ECGPreprocessor:
             return ((x - med) / mad).astype(np.float32)
         raise ValueError(f"Unknown normalization: {self.cfg.normalize}")
 
-    def __call__(self, x_list, fs_source: int) -> torch.Tensor:
+    def prepare_signal(self, x_list, fs_source: int) -> np.ndarray:
         x = np.asarray(x_list, dtype=np.float32)
-        x = self._resample(x, fs_source)
-        x = self._crop_pad(x)
+        return self._resample(x, fs_source)
+
+    def format_segment(self, x: np.ndarray, target_len: int | None = None) -> torch.Tensor:
+        x = self._crop_pad(x, target_len=target_len)
         x = self._normalize(x)
         return torch.from_numpy(x).unsqueeze(0)
+
+    def __call__(self, x_list, fs_source: int) -> torch.Tensor:
+        x = self.prepare_signal(x_list, fs_source)
+        return self.format_segment(x)

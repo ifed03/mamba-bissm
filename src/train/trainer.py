@@ -7,7 +7,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
-from evaluate.evaluator import predict
+from evaluate.evaluator import evaluate_record_level
 from evaluate.plots import save_plots
 from train.checkpointing import save_checkpoint
 from train.losses import make_bce_loss
@@ -53,11 +53,24 @@ def _save_predictions(path: Path, record_ids, y_true, y_prob, split: str):
     df.to_parquet(path, index=False)
 
 
+def _save_segment_predictions(path: Path, segment_outputs: dict, split: str):
+    df = pd.DataFrame(
+        {
+            "record_id": list(segment_outputs["record_id"]),
+            "segment_idx": np.array(segment_outputs["segment_idx"]).astype(int),
+            "y_true": np.array(segment_outputs["y_true"]).astype(int),
+            "y_prob": np.array(segment_outputs["y_prob"]),
+            "split": split,
+        }
+    )
+    df.to_parquet(path, index=False)
+
+
 def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    y_train = np.array([train_loader.dataset.labels[i] for i in train_loader.dataset.indices])
+    y_train = np.array(train_loader.dataset.sample_labels)
     pos_weight = (len(y_train) - y_train.sum()) / max(y_train.sum(), 1)
     criterion = make_bce_loss(float(pos_weight)).to(device)
 
@@ -78,11 +91,12 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     for epoch in range(cfg["training"]["epochs"]):
         tr_loss = _run_epoch(model, train_loader, opt, criterion, device, scaler, cfg["training"]["grad_clip"])
         sched.step()
-        yv, pv, _ = predict(model, val_loader, device)
-        thr = choose_threshold_max_f1(yv, pv)
-        vm = compute_metrics(yv, pv, thr)
-        if vm["auroc"] > best_auc:
-            best_auc, best_epoch, bad = vm["auroc"], epoch, 0
+        _, val_record_outputs, _, _ = evaluate_record_level(model, val_loader, device, threshold=0.5)
+        thr = choose_threshold_max_f1(val_record_outputs["y_true"], val_record_outputs["y_prob"])
+        vm = compute_metrics(val_record_outputs["y_true"], val_record_outputs["y_prob"], thr)
+        score = vm["auroc"] if not np.isnan(vm["auroc"]) else vm["f1"]
+        if score > best_auc:
+            best_auc, best_epoch, bad = score, epoch, 0
             save_checkpoint(best_ckpt_path, model, opt, epoch, best_auc)
             save_json(run_dir / "best_val_metrics.json", {"epoch": epoch, "train_loss": tr_loss, "threshold": thr, **vm})
         else:
@@ -93,28 +107,30 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     ckpt = torch.load(best_ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model"])
 
-    yv, pv, _ = predict(model, val_loader, device)
-    thr = choose_threshold_max_f1(yv, pv)
-    yt, pt, feats = predict(model, test_loader, device)
+    _, val_record_outputs, val_segment_outputs, _ = evaluate_record_level(model, val_loader, device, threshold=0.5)
+    thr = choose_threshold_max_f1(val_record_outputs["y_true"], val_record_outputs["y_prob"])
+    _, test_record_outputs, test_segment_outputs, feats = evaluate_record_level(model, test_loader, device, threshold=thr)
 
     _save_predictions(
         run_dir / "preds_val.parquet",
-        [val_loader.dataset.record_ids[i] for i in val_loader.dataset.indices],
-        yv,
-        pv,
+        val_record_outputs["record_id"],
+        val_record_outputs["y_true"],
+        val_record_outputs["y_prob"],
         "val",
     )
     _save_predictions(
         run_dir / "preds.parquet",
-        [test_loader.dataset.record_ids[i] for i in test_loader.dataset.indices],
-        yt,
-        pt,
+        test_record_outputs["record_id"],
+        test_record_outputs["y_true"],
+        test_record_outputs["y_prob"],
         "test",
     )
+    _save_segment_predictions(run_dir / "preds_val_segments.parquet", val_segment_outputs, "val")
+    _save_segment_predictions(run_dir / "preds_segments.parquet", test_segment_outputs, "test")
     np.savez(run_dir / "preds_test_features.npz", feats=feats)
 
-    tm = compute_metrics(yt, pt, thr)
-    save_plots(plots_dir, yt, pt, thr)
+    tm = compute_metrics(test_record_outputs["y_true"], test_record_outputs["y_prob"], thr)
+    save_plots(plots_dir, test_record_outputs["y_true"], test_record_outputs["y_prob"], thr)
     out = {"best_epoch": best_epoch, "best_val_auroc": best_auc, "threshold": thr, "test": tm}
     save_json(run_dir / "metrics.json", out)
     return out

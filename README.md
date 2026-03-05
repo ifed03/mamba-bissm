@@ -31,6 +31,12 @@ tests/
 pip install -e .
 ```
 
+Optional speedups:
+
+```bash
+pip install -e ".[speed]"
+```
+
 ## Create deterministic splits
 
 Holdout split (tracked convention: `splits/holdout_seed42/split.json`):
@@ -49,6 +55,13 @@ python scripts/make_splits.py --config configs/binary_ecgmamba_100hz.yaml --kfol
 
 ```bash
 python scripts/train_model.py --config configs/binary_ecgmamba_100hz.yaml
+```
+
+Train with official Mamba backbone variants:
+
+```bash
+python scripts/train_model.py --config configs/mamba.yaml
+python scripts/train_model.py --config configs/bimamba.yaml
 ```
 
 You can also pass a run name explicitly:
@@ -88,9 +101,11 @@ make test
 
 1. `list<float>` -> float32 ndarray -> tensor
 2. resample with `scipy.signal.resample_poly` to `fs_target` (default 100 Hz)
-3. fixed-length 10s window (`target_len = fs_target * 10`)
-   - train: random crop, val/test: center crop
-   - zero right-pad when short
+3. choose a segmentation strategy
+   - default crop mode: fixed-length 10s crop (`target_len = fs_target * 10`)
+     - train: random crop, val/test: center crop
+     - zero right-pad when short
+   - MIL window mode: split each record into non-overlapping 10s windows, zero-pad only the final remainder window, and inherit the parent record label for every segment
 4. normalization after crop/pad (`none`, `zscore`, `robust`)
 
 Output tensors are `(1, target_len)`.
@@ -98,8 +113,15 @@ Output tensors are `(1, target_len)`.
 ## Metrics & thresholding
 
 - AUROC
-- F1/Accuracy computed with threshold selected on validation set by maximizing F1
+- F1/Accuracy/Sensitivity computed with threshold selected on validation set by maximizing F1
+- In MIL mode, validation/test metrics are computed at the record level after max-pooling segment probabilities (`OR` logic)
 - Same threshold applied to test set
+
+## Splits
+
+- Holdout and K-fold splits are group-aware.
+- `split.group_id_col` controls the leakage boundary.
+- If that column is absent in parquet, the pipeline falls back to `record_id`.
 
 ## Run artifact contract
 
@@ -109,7 +131,9 @@ Each run directory should contain:
 - `metrics.json` (machine-readable summary)
 - `plots/` (ROC, PR, confusion matrix, score histogram)
 - `checkpoints/best.ckpt`
-- `preds.parquet` with columns `record_id, y_true, y_prob, split` for test predictions
-- `preds_val.parquet` with columns `record_id, y_true, y_prob, split` for validation predictions
+- `preds.parquet` with record-level columns `record_id, y_true, y_prob, split` for test predictions
+- `preds_val.parquet` with record-level columns `record_id, y_true, y_prob, split` for validation predictions
+- `preds_segments.parquet` with segment-level columns `record_id, segment_idx, y_true, y_prob, split` for test predictions when MIL mode is enabled
+- `preds_val_segments.parquet` with segment-level columns `record_id, segment_idx, y_true, y_prob, split` for validation predictions when MIL mode is enabled
 
 `runs/` is intentionally ignored by git.

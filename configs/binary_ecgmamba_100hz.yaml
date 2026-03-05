@@ -5,14 +5,20 @@ paths:
 split:
   method: holdout
   seed: 42
+  group_id_col: record_id
   train_ratio: 0.8
   val_ratio: 0.1
 preprocessing:
   fs_target: 100
   target_seconds: 10.0
   normalize: zscore
+  windowing:
+    enabled: true
+    window_seconds: 10.0
+    pad_remainder: true
 model:
   name: ecgmamba
+  backbone: bissm
   d_model: 128
   n_layers: 8
   dropout: 0.1

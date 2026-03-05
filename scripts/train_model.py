@@ -8,12 +8,10 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path) # .insert(0, ...) puts it at the front of the search list
 
 import argparse
-from pathlib import Path
 
 from data.datamodule import make_dataloaders
 from data.splits import load_split
-from models.cnn_baseline import CNNBaseline
-from models.ecgmamba import ECGMamba
+from models import build_model
 from train.trainer import train_model
 from utils.config import load_config, save_config
 from utils.io import make_run_dir
@@ -34,7 +32,7 @@ if __name__ == "__main__":
     split = load_split(split_path)
     train_loader, val_loader, test_loader = make_dataloaders(cfg, split)
 
-    model = ECGMamba(cfg) if cfg["model"]["name"] == "ecgmamba" else CNNBaseline(cfg)
+    model = build_model(cfg)
     run_dir = make_run_dir(cfg["paths"]["runs_dir"], args.run_name, cfg)
     save_config(run_dir / "config_resolved.yaml", cfg)
     metrics = train_model(model, train_loader, val_loader, test_loader, cfg, run_dir)

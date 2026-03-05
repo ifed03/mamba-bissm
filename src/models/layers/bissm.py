@@ -4,6 +4,13 @@ import torch.nn.functional as F
 
 from .swish import Swish
 
+# core custom sequence layer - bidirectional state-space modeling
+# processes sequence forward in time and backward in time then combines both
+
+# local conv first
+# then long-range sequential state update
+# in both directions
+# then gating
 
 class BiSSM(nn.Module):
     """Bi-directional selective SSM with per-channel state size N.
@@ -20,13 +27,18 @@ class BiSSM(nn.Module):
         self.ed = d_model * expansion
         self.n = state_dim
         self.eps = eps
-
+        # project input into expanded feature space
         self.x_proj = nn.Linear(d_model, self.ed)
+        # gating
         self.z_proj = nn.Linear(d_model, self.ed)
+        # forward-direction convolution preprocessing
         self.conv_f = nn.Conv1d(self.ed, self.ed, kernel_size=kernel_size, padding=kernel_size - 1, groups=1)
+        # backward-direction convolution preprocessing
         self.conv_b = nn.Conv1d(self.ed, self.ed, kernel_size=kernel_size, padding=kernel_size - 1, groups=1)
+        # activation after convolutions and for later gating
         self.swish = Swish()
 
+        # generate forward/backward B, C, foward step sizes (delta), add trainable delta bias
         self.B_f = nn.Linear(self.ed, self.n)
         self.C_f = nn.Linear(self.ed, self.n)
         self.delta_f = nn.Linear(self.ed, self.ed)
@@ -37,7 +49,9 @@ class BiSSM(nn.Module):
         self.delta_b = nn.Linear(self.ed, self.ed)
         self.delta_bias_b = nn.Parameter(torch.zeros(self.ed))
 
+        # Learned base SSM dynamics matrix, before constraining it
         self.A_raw = nn.Parameter(torch.randn(self.ed, self.n) * 0.02)
+        # Projects internal expanded features back to model width
         self.out_proj = nn.Linear(self.ed, d_model)
 
     def _causal_trim(self, x, L):
@@ -54,6 +68,7 @@ class BiSSM(nn.Module):
             Bt = B[:, t, :].unsqueeze(1).expand(-1, ED, -1)
             Ct = C[:, t, :].unsqueeze(1).expand(-1, ED, -1)
             delt = delta[:, t, :].unsqueeze(-1)
+            # Builds a discrete-time transition factor from continuous dynamics
             Abar = torch.exp(delt * A.unsqueeze(0))
             Bbar = ((Abar - 1.0) / (A.unsqueeze(0) + self.eps)) * Bt
             h = Abar * h + Bbar * ut.unsqueeze(-1)
