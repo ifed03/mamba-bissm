@@ -4,7 +4,17 @@ import pandas as pd
 from data.parquet_dataset import ParquetECGDataset
 
 
-def _windowed_dataset(tmp_path, rows, *, fs_target, target_seconds, normalize, window_seconds, stride_seconds):
+def _windowed_dataset(
+    tmp_path,
+    rows,
+    *,
+    fs_target,
+    target_seconds,
+    normalize,
+    window_seconds,
+    stride_seconds,
+    pad_remainder=False,
+):
     data_path = tmp_path / "toy.parquet"
     pd.DataFrame(rows).to_parquet(data_path, index=False)
     return ParquetECGDataset(
@@ -18,13 +28,13 @@ def _windowed_dataset(tmp_path, rows, *, fs_target, target_seconds, normalize, w
                 "enabled": True,
                 "window_seconds": window_seconds,
                 "stride_seconds": stride_seconds,
-                "pad_remainder": False,
+                "pad_remainder": pad_remainder,
             },
         },
     )
 
 
-def test_equal_stride_long_record_drops_final_incomplete_window(tmp_path):
+def test_windowed_dataset_expands_records_into_segments_without_long_record_remainder_padding(tmp_path):
     ds = _windowed_dataset(
         tmp_path,
         [{"record_id": "r1", "x": list(range(12)), "label": 1, "fs": 1}],
