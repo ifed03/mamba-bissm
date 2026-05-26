@@ -35,6 +35,13 @@ class ECGPreprocessor:
             x = np.pad(x, (0, target_len - len(x)), mode="constant")
         return x.astype(np.float32)
 
+    def _crop_only(self, x: np.ndarray, target_len: int | None = None) -> np.ndarray:
+        target_len = self.target_length if target_len is None else int(target_len)
+        if len(x) > target_len:
+            start = np.random.randint(0, len(x) - target_len + 1) if self.cfg.random_crop else (len(x) - target_len) // 2
+            x = x[start : start + target_len]
+        return x.astype(np.float32)
+
     def _normalize(self, x: np.ndarray) -> np.ndarray:
         if self.cfg.normalize == "none":
             return x
@@ -51,9 +58,12 @@ class ECGPreprocessor:
         return self._resample(x, fs_source)
 
     def format_segment(self, x: np.ndarray, target_len: int | None = None) -> torch.Tensor:
-        x = self._crop_pad(x, target_len=target_len)
+        target_len = self.target_length if target_len is None else int(target_len)
+        x = self._crop_only(x, target_len=target_len)
         x = self._normalize(x)
-        return torch.from_numpy(x).unsqueeze(0)
+        if len(x) < target_len:
+            x = np.pad(x, (0, target_len - len(x)), mode="constant")
+        return torch.from_numpy(x.astype(np.float32)).unsqueeze(0)
 
     def __call__(self, x_list, fs_source: int) -> torch.Tensor:
         x = self.prepare_signal(x_list, fs_source)
