@@ -1,5 +1,12 @@
 import numpy as np
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, recall_score, roc_auc_score, precision_recall_curve
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    confusion_matrix,
+    f1_score,
+    precision_recall_curve,
+    roc_auc_score,
+)
 
 
 def choose_threshold_max_f1(y_true, y_prob):
@@ -13,11 +20,22 @@ def compute_metrics(y_true, y_prob, threshold=0.5):
     y_pred = (np.array(y_prob) >= threshold).astype(int)
     y_true = np.array(y_true).astype(int)
     y_prob = np.array(y_prob)
-    auroc = float(roc_auc_score(y_true, y_prob)) if len(np.unique(y_true)) > 1 else float("nan")
+    has_two_classes = len(np.unique(y_true)) > 1
+    auroc = float(roc_auc_score(y_true, y_prob)) if has_two_classes else float("nan")
+    auprc = float(average_precision_score(y_true, y_prob)) if has_two_classes else float("nan")
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    tn, fp, fn, tp = cm.ravel()
+    sensitivity = float(tp / (tp + fn)) if (tp + fn) > 0 else float("nan")
+    specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else float("nan")
+    accuracy = float(accuracy_score(y_true, y_pred))
     return {
         "auroc": auroc,
+        "auprc": auprc,
         "f1": float(f1_score(y_true, y_pred, zero_division=0)),
-        "acc": float(accuracy_score(y_true, y_pred)),
-        "sensitivity": float(recall_score(y_true, y_pred, zero_division=0)),
-        "cm": confusion_matrix(y_true, y_pred).tolist(),
+        "accuracy": accuracy,
+        "acc": accuracy,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+        "confusion_matrix": cm.tolist(),
+        "cm": cm.tolist(),
     }

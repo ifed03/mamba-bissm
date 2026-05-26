@@ -129,8 +129,9 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     _save_segment_predictions(run_dir / "preds_segments.parquet", test_segment_outputs, "test")
     np.savez(run_dir / "preds_test_features.npz", feats=feats)
 
+    vm = compute_metrics(val_record_outputs["y_true"], val_record_outputs["y_prob"], thr)
     tm = compute_metrics(test_record_outputs["y_true"], test_record_outputs["y_prob"], thr)
     save_plots(plots_dir, test_record_outputs["y_true"], test_record_outputs["y_prob"], thr)
-    out = {"best_epoch": best_epoch, "best_val_auroc": best_auc, "threshold": thr, "test": tm}
+    out = {"best_epoch": best_epoch, "best_val_auroc": best_auc, "threshold": thr, "val": vm, "test": tm}
     save_json(run_dir / "metrics.json", out)
     return out
