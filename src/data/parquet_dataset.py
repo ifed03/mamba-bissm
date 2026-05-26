@@ -30,6 +30,7 @@ class ParquetECGDataset(Dataset):
         self.preprocessor = ECGPreprocessor(tcfg)
         self.windowing_enabled = bool(windowing_cfg.get("enabled", False))
         self.window_seconds = float(windowing_cfg.get("window_seconds", tcfg.target_seconds))
+        self.stride_seconds = float(windowing_cfg.get("stride_seconds", self.window_seconds))
         self.pad_remainder = bool(windowing_cfg.get("pad_remainder", True))
 
         if self.windowing_enabled and not math.isclose(self.window_seconds, tcfg.target_seconds):
@@ -50,6 +51,7 @@ class ParquetECGDataset(Dataset):
         self.fs = []
         self._signals = []
         self._raw_signals = []
+        self._window_starts = []
         self._samples = []
         self.sample_record_ids = []
         self.sample_labels = []
@@ -71,9 +73,17 @@ class ParquetECGDataset(Dataset):
             if self.windowing_enabled:
                 signal = self.preprocessor.prepare_signal(all_xs[row_idx], fs)
                 self._signals.append(signal)
-                num_segments = max(1, math.ceil(len(signal) / window_len)) if self.pad_remainder else max(1, len(signal) // window_len)
+                stride_len = int(round(self.stride_seconds * self.preprocessor.cfg.fs_target))
+                if stride_len <= 0:
+                    raise ValueError("windowing.stride_seconds must produce a positive stride length")
+                if len(signal) < window_len:
+                    starts = [0]
+                else:
+                    starts = [start for start in range(0, len(signal) - window_len + 1, stride_len)]
+                num_segments = len(starts)
+                self._window_starts.append(starts)
                 self.record_num_segments.append(num_segments)
-                for segment_idx in range(num_segments):
+                for segment_idx, _ in enumerate(starts):
                     sample_idx = len(self._samples)
                     self._samples.append((dataset_idx, segment_idx))
                     self.sample_record_ids.append(record_id)
@@ -96,11 +106,9 @@ class ParquetECGDataset(Dataset):
     def _segment_signal(self, dataset_idx: int, segment_idx: int):
         signal = self._signals[dataset_idx]
         window_len = self.preprocessor.target_length
-        start = segment_idx * window_len
+        start = self._window_starts[dataset_idx][segment_idx]
         stop = start + window_len
         segment = signal[start:stop]
-        if len(segment) == 0:
-            segment = signal[:window_len]
         return segment
 
     def __getitem__(self, idx: int):
