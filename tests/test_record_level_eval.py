@@ -18,5 +18,9 @@ def test_record_level_or_aggregation_uses_max_probability():
     assert record_outputs["record_id"] == ["a", "b"]
     assert np.allclose(record_outputs["y_prob"], np.array([0.9, 0.7]))
     assert metrics["acc"] == 0.5
+    assert metrics["accuracy"] == 0.5
     assert metrics["f1"] == 2 / 3
     assert metrics["sensitivity"] == 1.0
+    assert "auprc" in metrics
+    assert "specificity" in metrics
+    assert "confusion_matrix" in metrics
