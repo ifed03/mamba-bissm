@@ -4,30 +4,59 @@ import pandas as pd
 from data.parquet_dataset import ParquetECGDataset
 
 
-def test_windowed_dataset_expands_records_into_segments(tmp_path):
+def _windowed_dataset(tmp_path, signal, *, window_seconds, stride_seconds, normalize="none", pad_remainder=True):
     data_path = tmp_path / "toy.parquet"
-    pd.DataFrame(
-        [
-            {"record_id": "r1", "x": list(range(12)), "label": 1, "fs": 1},
-            {"record_id": "r2", "x": list(range(5)), "label": 0, "fs": 1},
-        ]
-    ).to_parquet(data_path, index=False)
+    pd.DataFrame([{"record_id": "r1", "x": list(signal), "label": 1, "fs": 1}]).to_parquet(data_path, index=False)
 
-    ds = ParquetECGDataset(
+    return ParquetECGDataset(
         str(data_path),
         train=False,
         preprocess_cfg={
             "fs_target": 1,
-            "target_seconds": 5.0,
-            "normalize": "none",
-            "windowing": {"enabled": True, "window_seconds": 5.0, "stride_seconds": 5.0, "pad_remainder": True},
+            "target_seconds": window_seconds,
+            "normalize": normalize,
+            "windowing": {
+                "enabled": True,
+                "window_seconds": window_seconds,
+                "stride_seconds": stride_seconds,
+                "pad_remainder": pad_remainder,
+            },
         },
     )
 
+
+def test_windowed_dataset_drops_final_incomplete_window_with_equal_stride(tmp_path):
+    ds = _windowed_dataset(tmp_path, range(12), window_seconds=5.0, stride_seconds=5.0, pad_remainder=True)
+
+    assert len(ds) == 2
+    assert ds._window_starts[0] == [0, 5]
+    assert ds.record_batches == [[0, 1]]
+    assert ds.sample_record_ids == ["r1", "r1"]
+    assert ds.sample_labels == [1, 1]
+
+    final_window = ds[1]["x"].squeeze(0).numpy()
+    assert np.array_equal(final_window, np.array([5, 6, 7, 8, 9], dtype=np.float32))
+
+
+def test_windowed_dataset_drops_final_incomplete_window_with_overlap(tmp_path):
+    ds = _windowed_dataset(tmp_path, range(12), window_seconds=5.0, stride_seconds=2.0, pad_remainder=True)
+
     assert len(ds) == 4
-    assert ds.record_batches == [[0, 1, 2], [3]]
-    assert ds.sample_record_ids == ["r1", "r1", "r1", "r2"]
-    assert ds.sample_labels == [1, 1, 1, 0]
+    assert ds._window_starts[0] == [0, 2, 4, 6]
+    assert [ds[i]["segment_idx"].item() for i in range(len(ds))] == [0, 1, 2, 3]
+    assert ds.record_num_segments == [4]
+
+
+def test_windowed_dataset_exact_length_record_has_one_unpadded_window(tmp_path):
+    ds = _windowed_dataset(tmp_path, range(5), window_seconds=5.0, stride_seconds=2.0, pad_remainder=True)
+
+    assert len(ds) == 1
+    assert ds._window_starts[0] == [0]
+    assert np.array_equal(ds[0]["x"].squeeze(0).numpy(), np.arange(5, dtype=np.float32))
+
+
+def test_short_record_is_normalized_then_padded(tmp_path):
+    ds = _windowed_dataset(tmp_path, [1, 2, 3, 4], window_seconds=5.0, stride_seconds=2.0, normalize="zscore")
 
     final_window = ds[2]["x"].squeeze(0).numpy()
     assert np.array_equal(final_window, np.array([10, 11, 0, 0, 0], dtype=np.float32))
