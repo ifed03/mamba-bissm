@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 
 import numpy as np
 import pandas as pd
@@ -102,7 +103,10 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     best_metric, best_metric_name, best_epoch, bad = -1.0, "auroc", -1, 0
     best_ckpt_path = checkpoints_dir / "best.ckpt"
     lr_history = []
+    epoch_times = []
+    train_start = time.perf_counter()
     for epoch in range(cfg["training"]["epochs"]):
+        epoch_t0 = time.perf_counter()
         tr_loss = _run_epoch(
             model,
             train_loader,
@@ -134,8 +138,11 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
             )
         else:
             bad += 1
+        epoch_times.append(time.perf_counter() - epoch_t0)
         if bad >= cfg["training"]["patience"]:
             break
+
+    training_time_seconds = time.perf_counter() - train_start
 
     ckpt = torch.load(best_ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model"])
@@ -176,6 +183,8 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
         "threshold": thr,
         "val": vm,
         "test": tm,
+        "training_time_seconds": float(training_time_seconds),
+        "mean_epoch_time_seconds": float(np.mean(epoch_times)) if epoch_times else 0.0,
     }
     save_json(run_dir / "metrics.json", out)
     return out
