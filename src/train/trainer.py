@@ -16,7 +16,7 @@ from train.metrics import choose_threshold_max_f1, compute_metrics
 from utils.logging import save_json
 
 
-def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_grad=1.0):
+def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_grad=1.0, scheduler=None, lr_history=None):
     model.train()
     losses = []
     for b in tqdm(loader, leave=False):
@@ -31,12 +31,19 @@ def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_gr
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
         else:
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+            prev_scale = scaler.get_scale()
             scaler.step(optimizer)
             scaler.update()
+            if scheduler is not None and scaler.get_scale() >= prev_scale:
+                scheduler.step()
+        if lr_history is not None:
+            lr_history.append(optimizer.param_groups[0]["lr"])
         losses.append(loss.item())
     return float(np.mean(losses))
 
@@ -88,9 +95,19 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
 
     best_auc, best_epoch, bad = -1.0, -1, 0
     best_ckpt_path = checkpoints_dir / "best.ckpt"
+    lr_history = []
     for epoch in range(cfg["training"]["epochs"]):
-        tr_loss = _run_epoch(model, train_loader, opt, criterion, device, scaler, cfg["training"]["grad_clip"])
-        sched.step()
+        tr_loss = _run_epoch(
+            model,
+            train_loader,
+            opt,
+            criterion,
+            device,
+            scaler,
+            cfg["training"]["grad_clip"],
+            scheduler=sched,
+            lr_history=lr_history,
+        )
         _, val_record_outputs, _, _ = evaluate_record_level(model, val_loader, device, threshold=0.5)
         thr = choose_threshold_max_f1(val_record_outputs["y_true"], val_record_outputs["y_prob"])
         vm = compute_metrics(val_record_outputs["y_true"], val_record_outputs["y_prob"], thr)
@@ -132,6 +149,9 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     vm = compute_metrics(val_record_outputs["y_true"], val_record_outputs["y_prob"], thr)
     tm = compute_metrics(test_record_outputs["y_true"], test_record_outputs["y_prob"], thr)
     save_plots(plots_dir, test_record_outputs["y_true"], test_record_outputs["y_prob"], thr)
+    pd.DataFrame({"update": np.arange(1, len(lr_history) + 1), "lr": lr_history}).to_csv(
+        run_dir / "lr_history.csv", index=False
+    )
     out = {"best_epoch": best_epoch, "best_val_auroc": best_auc, "threshold": thr, "val": vm, "test": tm}
     save_json(run_dir / "metrics.json", out)
     return out
