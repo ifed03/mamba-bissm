@@ -34,7 +34,7 @@ class ParquetECGDataset(Dataset):
         self.pad_remainder = bool(windowing_cfg.get("pad_remainder", True))
 
         if self.windowing_enabled and not math.isclose(self.window_seconds, tcfg.target_seconds):
-            raise ValueError("Windowed MIL expects preprocessing.target_seconds to match windowing.window_seconds")
+            raise ValueError("Windowed preprocessing expects preprocessing.target_seconds to match windowing.window_seconds")
 
         table = pq.read_table(Path(path), columns=["record_id", "x", "label", "fs"])
         all_record_ids = table["record_id"].to_pylist()

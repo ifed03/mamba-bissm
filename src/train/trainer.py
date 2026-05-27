@@ -47,6 +47,7 @@ def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_gr
             prev_scale = scaler.get_scale()
             scaler.step(optimizer)
             scaler.update()
+            # Only advance the scheduler after a successful optimizer update; GradScaler lowers the scale when it skips.
             if scheduler is not None and scaler.get_scale() >= prev_scale:
                 scheduler.step()
         if lr_history is not None:

@@ -105,8 +105,10 @@ make test
    - default crop mode: fixed-length 10s crop (`target_len = fs_target * 10`)
      - train: random crop, val/test: center crop
      - zero right-pad when short
-   - MIL window mode: split each record into non-overlapping 10s windows, zero-pad only the final remainder window, and inherit the parent record label for every segment
-4. normalization after crop/pad (`none`, `zscore`, `robust`)
+   - window mode: split each record into fixed-length windows and inherit the parent record label for every window
+     - the primary clean-data protocol uses 4, 6, 8 and 10s windows with 2s stride
+     - final incomplete windows are dropped, except when an entire record is shorter than the requested window length, in which case one window is retained and padded after normalization
+4. normalization is applied before zero-padding in window mode (`none`, `zscore`, `robust`)
 
 Output tensors are `(1, target_len)`.
 
@@ -114,8 +116,13 @@ Output tensors are `(1, target_len)`.
 
 - AUROC
 - F1/Accuracy/Sensitivity computed with threshold selected on validation set by maximizing F1
-- In MIL mode, validation/test metrics are computed at the record level after max-pooling segment probabilities (`OR` logic)
+- The implementation uses independent window-level BCE training with inherited record labels. During validation and testing, window probabilities are grouped by record and max-pooled to obtain a record-level prediction. This is MIL-like at evaluation time but is not a full differentiable bag-level MIL objective.
 - Same threshold applied to test set
+
+## Optimizer & scheduler
+
+- Training uses AdamW with linear warm-up followed by cosine decay.
+- In mixed-precision training, the scheduler is stepped only after a successful optimizer update, so it is not advanced when GradScaler skips an update due to non-finite gradients.
 
 ## Splits
 
@@ -133,7 +140,7 @@ Each run directory should contain:
 - `checkpoints/best.ckpt`
 - `preds.parquet` with record-level columns `record_id, y_true, y_prob, split` for test predictions
 - `preds_val.parquet` with record-level columns `record_id, y_true, y_prob, split` for validation predictions
-- `preds_segments.parquet` with segment-level columns `record_id, segment_idx, y_true, y_prob, split` for test predictions when MIL mode is enabled
-- `preds_val_segments.parquet` with segment-level columns `record_id, segment_idx, y_true, y_prob, split` for validation predictions when MIL mode is enabled
+- `preds_segments.parquet` with window-level columns `record_id, segment_idx, y_true, y_prob, split` for test predictions when window mode is enabled
+- `preds_val_segments.parquet` with window-level columns `record_id, segment_idx, y_true, y_prob, split` for validation predictions when window mode is enabled
 
 `runs/` is intentionally ignored by git.
