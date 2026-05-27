@@ -11,6 +11,37 @@ import pandas as pd
 import torch
 
 
+def _repeat_batch(x: torch.Tensor, batch_size: int) -> torch.Tensor:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if x.ndim == 0:
+        raise ValueError("expected a batched tensor")
+    return x.repeat(batch_size, *([1] * (x.ndim - 1)))
+
+
+def efficiency_metadata_from_config(cfg: dict, x_ref: torch.Tensor | None = None) -> dict:
+    preprocessing = cfg.get("preprocessing", {}) or {}
+    windowing = preprocessing.get("windowing", {}) or {}
+
+    window_seconds = windowing.get("window_seconds", preprocessing.get("target_seconds"))
+    stride_seconds = windowing.get("stride_seconds", window_seconds)
+
+    if x_ref is not None:
+        input_length_samples = int(x_ref.shape[-1])
+    else:
+        target_seconds = preprocessing.get("target_seconds", window_seconds)
+        fs_target = preprocessing.get("fs_target")
+        input_length_samples = None
+        if target_seconds is not None and fs_target is not None:
+            input_length_samples = int(round(float(target_seconds) * float(fs_target)))
+
+    return {
+        "window_seconds": float(window_seconds) if window_seconds is not None else None,
+        "stride_seconds": float(stride_seconds) if stride_seconds is not None else None,
+        "input_length_samples": input_length_samples,
+    }
+
+
 def count_parameters(model: torch.nn.Module) -> tuple[int, int]:
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)

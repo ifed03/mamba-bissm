@@ -10,20 +10,6 @@ import argparse
 
 import torch
 
-from data.datamodule import make_dataloaders
-from data.splits import load_split
-from evaluate.efficiency import (
-    count_parameters,
-    cpu_info,
-    profile_record_latency,
-    profile_window_latency,
-    write_efficiency_outputs,
-)
-from models import build_model
-from train.checkpointing import load_checkpoint
-from utils.config import load_config
-
-
 def _run_dir_from_ckpt(ckpt: str) -> Path:
     p = Path(ckpt)
     return p.parent.parent if p.parent.name == "checkpoints" else p.parent
@@ -41,6 +27,21 @@ if __name__ == "__main__":
     p.add_argument("--max-records", type=int, default=None)
     args = p.parse_args()
 
+    from data.datamodule import make_dataloaders
+    from data.splits import load_split
+    from evaluate.efficiency import (
+        count_parameters,
+        cpu_info,
+        efficiency_metadata_from_config,
+        profile_record_latency,
+        profile_window_latency,
+        _repeat_batch,
+        write_efficiency_outputs,
+    )
+    from models import build_model
+    from train.checkpointing import load_checkpoint
+    from utils.config import load_config
+
     cfg = load_config(args.config)
     split_path = args.split or str(Path(cfg["paths"]["splits_dir"]) / f"holdout_seed{cfg['split']['seed']}" / "split.json")
     split = load_split(split_path)
@@ -56,7 +57,7 @@ if __name__ == "__main__":
 
     first_batch = next(iter(test_loader_for_window))
     x_ref = first_batch["x"][0:1].to(device=device, dtype=torch.float32)
-    x16 = x_ref.repeat(args.throughput_batch_size, 1)
+    x16 = _repeat_batch(x_ref, args.throughput_batch_size)
 
     t1 = profile_window_latency(model, x_ref, args.warmup, args.repeats)
     t16 = profile_window_latency(model, x16, args.warmup, args.repeats)
@@ -70,14 +71,13 @@ if __name__ == "__main__":
 
     run_dir = _run_dir_from_ckpt(args.ckpt)
     wps16 = float(args.throughput_batch_size / (sum(t16) / len(t16) / 1000.0))
+    metadata = efficiency_metadata_from_config(cfg, x_ref)
     payload = {
         "config_path": str(Path(args.config).resolve()),
         "checkpoint_path": str(Path(args.ckpt).resolve()),
         "model_name": cfg.get("model", {}).get("name"),
         "backbone": cfg.get("model", {}).get("backbone"),
-        "window_seconds": cfg["preprocessing"].get("window_seconds"),
-        "stride_seconds": cfg["preprocessing"].get("stride_seconds"),
-        "input_length_samples": int(x_ref.shape[-1]),
+        **metadata,
         "timing_device": str(device),
         "precision": "fp32",
         "warmup_iterations": args.warmup,

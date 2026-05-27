@@ -2,7 +2,14 @@ import math
 
 import torch
 
-from evaluate.efficiency import count_parameters, profile_record_latency, profile_window_latency, _time_record_prediction
+from evaluate.efficiency import (
+    count_parameters,
+    efficiency_metadata_from_config,
+    profile_record_latency,
+    profile_window_latency,
+    _repeat_batch,
+    _time_record_prediction,
+)
 
 
 class TinyModel(torch.nn.Module):
@@ -36,6 +43,40 @@ def test_batch_size_outputs_present():
     t1 = profile_window_latency(m, x1, warmup=1, repeats=3)
     t16 = profile_window_latency(m, x16, warmup=1, repeats=3)
     assert len(t1) == 3 and len(t16) == 3
+
+
+def test_repeat_batch_preserves_non_batch_dimensions():
+    x2 = torch.arange(8, dtype=torch.float32).reshape(1, 8)
+    y2 = _repeat_batch(x2, 4)
+    assert y2.shape == (4, 8)
+    assert torch.equal(y2[0], x2[0])
+    assert torch.equal(y2[-1], x2[0])
+
+    x3 = torch.arange(8, dtype=torch.float32).reshape(1, 1, 8)
+    y3 = _repeat_batch(x3, 4)
+    assert y3.shape == (4, 1, 8)
+    assert torch.equal(y3[0], x3[0])
+    assert torch.equal(y3[-1], x3[0])
+
+
+def test_efficiency_metadata_reads_nested_windowing_config():
+    cfg = {
+        "preprocessing": {
+            "fs_target": 100,
+            "target_seconds": 4.0,
+            "windowing": {
+                "enabled": True,
+                "window_seconds": 4.0,
+                "stride_seconds": 2.0,
+            },
+        }
+    }
+
+    metadata = efficiency_metadata_from_config(cfg)
+
+    assert metadata["window_seconds"] == 4.0
+    assert metadata["stride_seconds"] == 2.0
+    assert metadata["input_length_samples"] == 400
 
 
 def test_record_level_profiling_rows_and_fields():
