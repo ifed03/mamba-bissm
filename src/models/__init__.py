@@ -1,5 +1,6 @@
 from .cnn_baseline import CNNBaseline
 from .ecgmamba import ECGMamba
+from .lstm_baseline import BiLSTMBaseline
 from .mamba_backbone import BiMambaBackbone, MambaBackbone
 
 
@@ -9,12 +10,15 @@ def build_model(cfg: dict):
         return ECGMamba(cfg)
     if model_name == "cnn":
         return CNNBaseline(cfg)
+    if model_name == "bilstm":
+        return BiLSTMBaseline(cfg)
     raise ValueError(f"Unsupported model.name '{model_name}'.")
 
 
 __all__ = [
     "CNNBaseline",
     "ECGMamba",
+    "BiLSTMBaseline",
     "MambaBackbone",
     "BiMambaBackbone",
     "build_model",
