@@ -1,13 +1,16 @@
 import torch
 
 
-def save_checkpoint(path, model, optimizer, epoch, best_metric):
-    torch.save({
+def save_checkpoint(path, model, optimizer, epoch, best_metric, best_metric_name=None):
+    payload = {
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "epoch": epoch,
         "best_metric": best_metric,
-    }, path)
+    }
+    if best_metric_name is not None:
+        payload["best_metric_name"] = best_metric_name
+    torch.save(payload, path)
 
 
 def load_checkpoint(path, model, optimizer=None):

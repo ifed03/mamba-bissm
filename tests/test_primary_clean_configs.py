@@ -19,3 +19,4 @@ def test_primary_clean_configs_window_shapes_and_stride():
         assert cfg["preprocessing"]["windowing"]["window_seconds"] == seconds
         assert cfg["preprocessing"]["windowing"]["stride_seconds"] == 2.0
         assert cfg["preprocessing"]["windowing"]["pad_remainder"] is False
+        assert "accumulation_steps" not in cfg["training"]
