@@ -31,6 +31,16 @@ class TinyModel(torch.nn.Module):
         return self.linear(x), None
 
 
+class RecordingAdamW(AdamW):
+    def __init__(self, *args, order, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.order = order
+
+    def step(self, *args, **kwargs):
+        self.order.append("optimizer")
+        return super().step(*args, **kwargs)
+
+
 def _make_setup(total_steps=8, warmup_steps=2):
     model = TinyModel()
     optimizer = AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
@@ -77,21 +87,19 @@ def test_scheduler_steps_per_optimizer_update_count():
 
 
 def test_scheduler_step_after_optimizer_step_order():
-    model, optimizer, scheduler, criterion, loader = _make_setup(total_steps=4, warmup_steps=1)
-
     order = []
-    original_opt_step = optimizer.step
-    original_sched_step = scheduler.step
+    model = TinyModel()
+    optimizer = RecordingAdamW(model.parameters(), lr=1e-3, weight_decay=1e-2, order=order)
+    scheduler = LambdaLR(optimizer, lambda s: cosine_with_warmup(s, total_steps=4, warmup_steps=1))
+    criterion = torch.nn.BCEWithLogitsLoss()
+    loader = DataLoader(TinyBatchDataset(n_batches=4), batch_size=1)
 
-    def opt_step_wrapper(*args, **kwargs):
-        order.append("optimizer")
-        return original_opt_step(*args, **kwargs)
+    original_sched_step = scheduler.step
 
     def sched_step_wrapper(*args, **kwargs):
         order.append("scheduler")
         return original_sched_step(*args, **kwargs)
 
-    optimizer.step = opt_step_wrapper
     scheduler.step = sched_step_wrapper
 
     _run_epoch(
