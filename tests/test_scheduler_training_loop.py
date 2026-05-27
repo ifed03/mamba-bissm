@@ -6,7 +6,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset
 
 from train.lr_schedule import cosine_with_warmup
-from train.trainer import _run_epoch
+from train.trainer import _run_epoch, _select_best_val_metric
 
 
 class TinyBatchDataset(Dataset):
@@ -134,3 +134,15 @@ def test_run_epoch_with_amp_disabled_on_cpu_still_works():
         lr_history=[],
     )
     assert math.isfinite(loss)
+
+
+def test_best_metric_selection_uses_auroc_when_defined():
+    metric_name, metric_value = _select_best_val_metric({"auroc": 0.83, "f1": 0.61})
+    assert metric_name == "auroc"
+    assert math.isclose(metric_value, 0.83, rel_tol=1e-9)
+
+
+def test_best_metric_selection_uses_f1_fallback_when_auroc_nan():
+    metric_name, metric_value = _select_best_val_metric({"auroc": float("nan"), "f1": 0.61})
+    assert metric_name == "f1_fallback"
+    assert math.isclose(metric_value, 0.61, rel_tol=1e-9)

@@ -16,6 +16,12 @@ from train.metrics import choose_threshold_max_f1, compute_metrics
 from utils.logging import save_json
 
 
+def _select_best_val_metric(vm: dict) -> tuple[str, float]:
+    if not np.isnan(vm["auroc"]):
+        return "auroc", float(vm["auroc"])
+    return "f1_fallback", float(vm["f1"])
+
+
 def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_grad=1.0, scheduler=None, lr_history=None):
     model.train()
     losses = []
@@ -93,7 +99,7 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     amp = cfg["training"].get("mixed_precision", True) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda") if amp else None
 
-    best_auc, best_epoch, bad = -1.0, -1, 0
+    best_metric, best_metric_name, best_epoch, bad = -1.0, "auroc", -1, 0
     best_ckpt_path = checkpoints_dir / "best.ckpt"
     lr_history = []
     for epoch in range(cfg["training"]["epochs"]):
@@ -111,11 +117,21 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
         _, val_record_outputs, _, _ = evaluate_record_level(model, val_loader, device, threshold=0.5)
         thr = choose_threshold_max_f1(val_record_outputs["y_true"], val_record_outputs["y_prob"])
         vm = compute_metrics(val_record_outputs["y_true"], val_record_outputs["y_prob"], thr)
-        score = vm["auroc"] if not np.isnan(vm["auroc"]) else vm["f1"]
-        if score > best_auc:
-            best_auc, best_epoch, bad = score, epoch, 0
-            save_checkpoint(best_ckpt_path, model, opt, epoch, best_auc)
-            save_json(run_dir / "best_val_metrics.json", {"epoch": epoch, "train_loss": tr_loss, "threshold": thr, **vm})
+        score_name, score = _select_best_val_metric(vm)
+        if score > best_metric:
+            best_metric, best_metric_name, best_epoch, bad = score, score_name, epoch, 0
+            save_checkpoint(best_ckpt_path, model, opt, epoch, best_metric, best_metric_name=best_metric_name)
+            save_json(
+                run_dir / "best_val_metrics.json",
+                {
+                    "epoch": epoch,
+                    "train_loss": tr_loss,
+                    "threshold": thr,
+                    "best_val_metric_name": best_metric_name,
+                    "best_val_metric": float(best_metric),
+                    **vm,
+                },
+            )
         else:
             bad += 1
         if bad >= cfg["training"]["patience"]:
@@ -152,6 +168,14 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     pd.DataFrame({"update": np.arange(1, len(lr_history) + 1), "lr": lr_history}).to_csv(
         run_dir / "lr_history.csv", index=False
     )
-    out = {"best_epoch": best_epoch, "best_val_auroc": best_auc, "threshold": thr, "val": vm, "test": tm}
+    out = {
+        "best_epoch": best_epoch,
+        "best_val_metric_name": best_metric_name,
+        "best_val_metric": float(best_metric),
+        "best_val_auroc": float(best_metric),  # backward-compatible alias; may be F1 fallback
+        "threshold": thr,
+        "val": vm,
+        "test": tm,
+    }
     save_json(run_dir / "metrics.json", out)
     return out
