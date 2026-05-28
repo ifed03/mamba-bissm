@@ -84,17 +84,11 @@ def _noise_cfg(base_seed=123, noise_type="bw", snr_db=0.0):
 
 def test_zero_shot_noise_is_test_only_and_preserves_clean_train_val(tmp_path):
     make_dataloaders, _ = _load_torch_dataset_modules()
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-    data_path = _write_dataset(tmp_path)
-    cfg = _cfg(data_path)
-    split = _split()
-=======
 
     data_path = _write_dataset(tmp_path)
     cfg = _cfg(data_path)
     split = _split()
 
->>>>>>> main
     clean_train, clean_val, clean_test = make_dataloaders(cfg, split)
     noisy_train, noisy_val, noisy_test = make_dataloaders(cfg, split, test_noise_cfg=_noise_cfg())
 
@@ -116,17 +110,11 @@ def test_zero_shot_noise_is_test_only_and_preserves_clean_train_val(tmp_path):
 
 def test_metadata_fields_and_deterministic_per_example_seeds(tmp_path):
     make_dataloaders, _ = _load_torch_dataset_modules()
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-    data_path = _write_dataset(tmp_path)
-    cfg = _cfg(data_path)
-    split = _split()
-=======
 
     data_path = _write_dataset(tmp_path)
     cfg = _cfg(data_path)
     split = _split()
 
->>>>>>> main
     _, _, a = make_dataloaders(cfg, split, test_noise_cfg=_noise_cfg(base_seed=7))
     _, _, b = make_dataloaders(cfg, split, test_noise_cfg=_noise_cfg(base_seed=7))
     _, _, c = make_dataloaders(cfg, split, test_noise_cfg=_noise_cfg(base_seed=8))
@@ -142,34 +130,22 @@ def test_metadata_fields_and_deterministic_per_example_seeds(tmp_path):
         "noise_start_index",
         "measured_snr_db",
     }
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-=======
 
->>>>>>> main
     assert required.issubset(a.dataset.noise_metadata[0])
     assert a.dataset.noise_metadata == b.dataset.noise_metadata
     assert np.array_equal(a.dataset._signals[0], b.dataset._signals[0])
     assert any(not np.array_equal(x, y) for x, y in zip(a.dataset._signals, c.dataset._signals, strict=True))
     assert a.dataset.noise_metadata[0]["seed"] == deterministic_example_seed(
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-        base_seed=7, record_id="test_r0", split="test", noise_type="bw", snr_db=0.0
-=======
         base_seed=7,
         record_id="test_r0",
         split="test",
         noise_type="bw",
         snr_db=0.0,
->>>>>>> main
     )
 
 
 def test_non_test_split_noise_config_fails_early(tmp_path):
     _, ParquetECGDataset = _load_torch_dataset_modules()
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-    data_path = _write_dataset(tmp_path)
-    with pytest.raises(ValueError, match="only allowed for test split"):
-        ParquetECGDataset(str(data_path), [0], train=False, preprocess_cfg=_cfg(data_path)["preprocessing"], split_name="val", noise_cfg=_noise_cfg())
-=======
 
     data_path = _write_dataset(tmp_path)
 
@@ -182,22 +158,15 @@ def test_non_test_split_noise_config_fails_early(tmp_path):
             split_name="val",
             noise_cfg=_noise_cfg(),
         )
->>>>>>> main
 
 
 def test_multiple_conditions_have_unambiguous_metrics_names_and_invalid_noise_fails():
     names = [metrics_filename(NoiseCondition(nt, snr)) for nt in ["bw", "em"] for snr in [24, -6]]
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-    assert len(names) == len(set(names))
-    assert all(name.startswith("metrics_zero-shot_noise_type=") and name.endswith(".json") for name in names)
-    assert DEFAULT_SNR_DB == [24.0, 18.0, 12.0, 6.0, 0.0, -6.0]
-=======
 
     assert len(names) == len(set(names))
     assert all(name.startswith("metrics_zero-shot_noise_type=") and name.endswith(".json") for name in names)
     assert DEFAULT_SNR_DB == [24.0, 18.0, 12.0, 6.0, 0.0, -6.0]
 
->>>>>>> main
     with pytest.raises(ValueError, match="Invalid noise type"):
         validate_noise_type("118e06")
 
@@ -208,11 +177,6 @@ def test_missing_nstdb_root_fails_clearly(tmp_path):
 
 
 def test_measured_snr_is_close_on_synthetic_example():
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-    injector = ZeroShotNoiseInjector(noise_type="ma", snr_db=6.0, base_seed=1, target_fs=100, noise=_noise(), noise_fs=100)
-    clean = np.sin(np.linspace(0, 6 * np.pi, 500)) + 0.1
-    noisy, meta = injector.inject(clean, record_id="synthetic", split="test")
-=======
     injector = ZeroShotNoiseInjector(
         noise_type="ma",
         snr_db=6.0,
@@ -225,22 +189,16 @@ def test_measured_snr_is_close_on_synthetic_example():
 
     noisy, meta = injector.inject(clean, record_id="synthetic", split="test")
 
->>>>>>> main
     assert noisy.shape == clean.shape
     assert np.isclose(meta["measured_snr_db"], 6.0, atol=1e-8)
 
 
 def test_threshold_loading_requires_clean_val(tmp_path):
     path = tmp_path / "tau.json"
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-    path.write_text(json.dumps({"threshold": 0.37, "threshold_source": "clean_val"}))
-    assert load_clean_threshold(path) == 0.37
-=======
 
     path.write_text(json.dumps({"threshold": 0.37, "threshold_source": "clean_val"}))
     assert load_clean_threshold(path) == 0.37
 
->>>>>>> main
     path.write_text(json.dumps({"threshold": 0.37, "threshold_source": "noisy_test"}))
     with pytest.raises(ValueError, match="clean_val"):
         load_clean_threshold(path)
@@ -260,17 +218,11 @@ def test_dry_run_zero_shot_evaluation_writes_nothing_and_missing_checkpoint_fail
         "training:\n"
         "  batch_size: 2\n"
     )
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-    out = tmp_path / "out"
-    ckpt = tmp_path / "model.ckpt"
-    ckpt.write_bytes(b"placeholder")
-=======
 
     out = tmp_path / "out"
     ckpt = tmp_path / "model.ckpt"
     ckpt.write_bytes(b"placeholder")
 
->>>>>>> main
     cmd = [
         sys.executable,
         "scripts/evaluate_model.py",
@@ -290,9 +242,6 @@ def test_dry_run_zero_shot_evaluation_writes_nothing_and_missing_checkpoint_fail
         str(out),
         "--dry-run",
     ]
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-    result = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1], text=True, capture_output=True, check=True)
-=======
 
     result = subprocess.run(
         cmd,
@@ -302,16 +251,12 @@ def test_dry_run_zero_shot_evaluation_writes_nothing_and_missing_checkpoint_fail
         check=True,
     )
 
->>>>>>> main
     assert "DRY-RUN complete" in result.stdout
     assert "metrics_zero-shot_noise_type=bw__snr_db=24.json" in result.stdout
     assert "metrics_zero-shot_noise_type=em__snr_db=0.json" in result.stdout
     assert not out.exists()
 
     missing = subprocess.run(
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-        [sys.executable, "scripts/evaluate_model.py", "--config", str(config), "--noise-eval", "zero-shot", "--dry-run"],
-=======
         [
             sys.executable,
             "scripts/evaluate_model.py",
@@ -321,14 +266,10 @@ def test_dry_run_zero_shot_evaluation_writes_nothing_and_missing_checkpoint_fail
             "zero-shot",
             "--dry-run",
         ],
->>>>>>> main
         cwd=Path(__file__).resolve().parents[1],
         text=True,
         capture_output=True,
     )
-<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
-=======
 
->>>>>>> main
     assert missing.returncode != 0
     assert "required for zero-shot noise evaluation" in (missing.stderr + missing.stdout)
