@@ -4,12 +4,19 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from .parquet_dataset import ParquetECGDataset, RecordBatchSampler
 
 
-def make_dataloaders(cfg: dict, split: dict):
+def make_dataloaders(cfg: dict, split: dict, test_noise_cfg: dict | None = None):
     data_path = cfg["paths"]["data_path"]
     pcfg = cfg["preprocessing"]
-    train_ds = ParquetECGDataset(data_path, split["train"], train=True, preprocess_cfg=pcfg)
-    val_ds = ParquetECGDataset(data_path, split["val"], train=False, preprocess_cfg=pcfg)
-    test_ds = ParquetECGDataset(data_path, split["test"], train=False, preprocess_cfg=pcfg)
+    train_ds = ParquetECGDataset(data_path, split["train"], train=True, preprocess_cfg=pcfg, split_name="train")
+    val_ds = ParquetECGDataset(data_path, split["val"], train=False, preprocess_cfg=pcfg, split_name="val")
+    test_ds = ParquetECGDataset(
+        data_path,
+        split["test"],
+        train=False,
+        preprocess_cfg=pcfg,
+        split_name="test",
+        noise_cfg=test_noise_cfg,
+    )
 
     batch_size = cfg["training"]["batch_size"]
     sampler = None
