@@ -94,6 +94,31 @@ Run the full clean-data 20-run AF/NSR matrix (reduced BiSSM 2/4, BiLSTM, Mamba 2
 python scripts/run_clean_full_matrix.py
 ```
 
+
+Specific sweep for:
+- smaller ECG-Mamba implementation across 4/6/8/10s windows
+- larger ECG-Mamba parameter version across 4/6/8/10s windows
+- larger BiSSM parameter count at 10s only
+
+```bash
+make sweep_window_ablation
+```
+
+Equivalent direct command:
+
+```bash
+python scripts/sweep.py --results runs/sweeps/window_ablation_ecgmamba_mamba_bissm.csv --configs \
+  configs/binary_ecgmamba_reduced_100hz_win4s_stride2s.yaml \
+  configs/binary_ecgmamba_reduced_100hz_win6s_stride2s.yaml \
+  configs/binary_ecgmamba_reduced_100hz_win8s_stride2s.yaml \
+  configs/binary_ecgmamba_reduced_100hz_win10s_stride2s.yaml \
+  configs/binary_ecgmamba_100hz_win4s_stride2s.yaml \
+  configs/binary_ecgmamba_100hz_win6s_stride2s.yaml \
+  configs/binary_ecgmamba_100hz_win8s_stride2s.yaml \
+  configs/binary_ecgmamba_100hz_win10s_stride2s.yaml \
+  configs/binary_bissm_reduced4_100hz_win10s_stride2s.yaml
+```
+
 ## Makefile shortcuts
 
 ```bash
