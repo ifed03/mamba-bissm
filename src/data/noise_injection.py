@@ -66,13 +66,13 @@ def _as_finite_1d_float(x: np.ndarray | list[float], name: str) -> np.ndarray:
     return arr
 
 
-def load_noise_record(noise_root: str | Path, noise_type: str):
+def load_noise_record(noise_root: str | Path = "data", noise_type: str = "bw"):
     """Load an NSTDB raw noise record using WFDB.
 
     Parameters
     ----------
     noise_root:
-        Root directory containing ``bw.*``, ``em.*``, and ``ma.*`` WFDB files.
+        Root directory containing exact raw NSTDB ``bw.*``, ``em.*``, and ``ma.*`` WFDB files. Defaults to ``data``.
     noise_type:
         One of ``bw``, ``em``, ``ma``.
 

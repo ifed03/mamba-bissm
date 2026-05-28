@@ -464,5 +464,11 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
         "training_time_seconds": float(training_time_seconds),
         "mean_epoch_time_seconds": float(np.mean(epoch_times)) if epoch_times else 0.0,
     }
+    save_json(run_dir / "clean_validation_threshold.json", {
+        "threshold": float(thr),
+        "threshold_source": "clean_val",
+        "checkpoint_source": "clean_val",
+        "checkpoint": str(best_ckpt_path),
+    })
     save_json(run_dir / "metrics.json", out)
     return out
