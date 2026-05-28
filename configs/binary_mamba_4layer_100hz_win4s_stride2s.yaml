@@ -18,12 +18,17 @@ preprocessing:
     stride_seconds: 2.0
     pad_remainder: false
 model:
-  name: bilstm
-  hidden_size: 128
-  num_layers: 2
-  bidirectional: true
-  dropout: 0.2
-  pooling: mean
+  name: mamba
+  backbone: mamba
+  d_model: 64
+  n_layers: 4
+  dropout: 0.1
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  use_encoder: true
+  use_layernorm: true
+  use_fast_path: true
 training:
   batch_size: 16
   epochs: 50
