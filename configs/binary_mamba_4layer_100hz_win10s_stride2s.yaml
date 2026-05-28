@@ -10,20 +10,25 @@ split:
   val_ratio: 0.1
 preprocessing:
   fs_target: 100
-  target_seconds: 4.0
+  target_seconds: 10.0
   normalize: zscore
   windowing:
     enabled: true
-    window_seconds: 4.0
+    window_seconds: 10.0
     stride_seconds: 2.0
     pad_remainder: false
 model:
-  name: bilstm
-  hidden_size: 128
-  num_layers: 2
-  bidirectional: true
-  dropout: 0.2
-  pooling: mean
+  name: mamba
+  backbone: mamba
+  d_model: 64
+  n_layers: 4
+  dropout: 0.1
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  use_encoder: true
+  use_layernorm: true
+  use_fast_path: true
 training:
   batch_size: 16
   epochs: 50

@@ -18,12 +18,19 @@ preprocessing:
     stride_seconds: 2.0
     pad_remainder: false
 model:
-  name: bilstm
-  hidden_size: 128
-  num_layers: 2
-  bidirectional: true
-  dropout: 0.2
-  pooling: mean
+  name: ecgmamba
+  backbone: bissm
+  d_model: 64
+  n_layers: 2
+  dropout: 0.1
+  state_dim: 64
+  kernel_size: 4
+  expansion: 2
+  ffn_hidden_mult: 4
+  ffn_kernel_size: 1
+  use_encoder: true
+  use_layernorm: true
+  use_ffn: true
 training:
   batch_size: 16
   epochs: 50

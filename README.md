@@ -88,6 +88,12 @@ python scripts/evaluate_model.py --config configs/binary_ecgmamba_100hz.yaml --c
 python scripts/sweep.py --configs configs/binary_cnn_baseline_100hz.yaml configs/binary_ecgmamba_100hz.yaml configs/binary_ecgmamba_500hz.yaml
 ```
 
+Run the full clean-data 20-run AF/NSR matrix (reduced BiSSM 2/4, BiLSTM, Mamba 2/4 across 4/6/8/10s):
+
+```bash
+python scripts/run_clean_full_matrix.py
+```
+
 ## Makefile shortcuts
 
 ```bash
