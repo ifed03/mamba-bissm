@@ -18,19 +18,17 @@ preprocessing:
     stride_seconds: 2.0
     pad_remainder: false
 model:
-  name: ecgmamba
-  backbone: bissm
-  d_model: 128
-  n_layers: 8
+  name: bimamba
+  backbone: bimamba
+  d_model: 64
+  n_layers: 2
   dropout: 0.1
-  state_dim: 32
-  kernel_size: 4
-  expansion: 2
-  ffn_hidden_mult: 4
-  ffn_kernel_size: 1
+  d_state: 16
+  d_conv: 4
+  expand: 2
   use_encoder: true
   use_layernorm: true
-  use_ffn: true
+  use_fast_path: true
 training:
   batch_size: 16
   epochs: 50

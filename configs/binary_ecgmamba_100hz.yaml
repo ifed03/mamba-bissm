@@ -39,7 +39,7 @@ training:
   warmup_ratio: 0.05
   patience: 10
   grad_clip: 1.0
-  mixed_precision: true
+  mixed_precision: false
   accumulation_steps: 4
   weighted_sampler: false
   deterministic: true
