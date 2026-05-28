@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import Dataset, Sampler
 
 from .transforms import ECGPreprocessor, TransformConfig
+from evaluate.noise_protocol import ZeroShotNoiseInjector, ensure_clean_split
 
 
 class RecordBatchSampler(Sampler[list[int]]):
@@ -21,7 +22,16 @@ class RecordBatchSampler(Sampler[list[int]]):
 
 
 class ParquetECGDataset(Dataset):
-    def __init__(self, path: str, indices: list[int] | None = None, train: bool = True, preprocess_cfg: dict | None = None):
+    def __init__(
+        self,
+        path: str,
+        indices: list[int] | None = None,
+        train: bool = True,
+        preprocess_cfg: dict | None = None,
+        *,
+        split_name: str | None = None,
+        noise_cfg: dict | None = None,
+    ):
         preprocess_cfg = dict(preprocess_cfg or {})
         windowing_cfg = dict(preprocess_cfg.pop("windowing", {}))
         expected_fs = preprocess_cfg.pop("fs_source_expected", None)
@@ -35,6 +45,22 @@ class ParquetECGDataset(Dataset):
 
         if self.windowing_enabled and not math.isclose(self.window_seconds, tcfg.target_seconds):
             raise ValueError("Windowed preprocessing expects preprocessing.target_seconds to match windowing.window_seconds")
+
+        self.split_name = split_name
+        self.noise_metadata = []
+        self.noise_injector = None
+        noise_cfg = dict(noise_cfg or {})
+        if noise_cfg.get("enabled", False):
+            ensure_clean_split(split_name or "")
+            self.noise_injector = ZeroShotNoiseInjector(
+                noise_type=noise_cfg["noise_type"],
+                snr_db=noise_cfg["snr_db"],
+                base_seed=noise_cfg.get("base_seed", 123),
+                target_fs=noise_cfg.get("target_fs", tcfg.fs_target),
+                noise_root=noise_cfg.get("noise_root", "data"),
+                noise=noise_cfg.get("noise"),
+                noise_fs=noise_cfg.get("noise_fs"),
+            )
 
         table = pq.read_table(Path(path), columns=["record_id", "x", "label", "fs"])
         all_record_ids = table["record_id"].to_pylist()
@@ -72,6 +98,9 @@ class ParquetECGDataset(Dataset):
 
             if self.windowing_enabled:
                 signal = self.preprocessor.prepare_signal(all_xs[row_idx], fs)
+                if self.noise_injector is not None:
+                    signal, meta = self.noise_injector.inject(signal, record_id=record_id, split=self.split_name or "test")
+                    self.noise_metadata.append(meta)
                 self._signals.append(signal)
                 stride_len = int(round(self.stride_seconds * self.preprocessor.cfg.fs_target))
                 if stride_len <= 0:
@@ -90,7 +119,13 @@ class ParquetECGDataset(Dataset):
                     self.sample_labels.append(label)
                     by_record[record_id].append(sample_idx)
             else:
-                self._raw_signals.append(all_xs[row_idx])
+                if self.noise_injector is not None:
+                    signal = self.preprocessor.prepare_signal(all_xs[row_idx], fs)
+                    signal, meta = self.noise_injector.inject(signal, record_id=record_id, split=self.split_name or "test")
+                    self.noise_metadata.append(meta)
+                    self._raw_signals.append(signal.tolist())
+                else:
+                    self._raw_signals.append(all_xs[row_idx])
                 self.record_num_segments.append(1)
                 sample_idx = len(self._samples)
                 self._samples.append((dataset_idx, 0))
@@ -119,7 +154,10 @@ class ParquetECGDataset(Dataset):
             x = self.preprocessor.format_segment(self._segment_signal(dataset_idx, segment_idx))
             num_segments = self.record_num_segments[dataset_idx]
         else:
-            x = self.preprocessor(self._raw_signals[dataset_idx], int(self.fs[dataset_idx]))
+            if self.noise_injector is not None:
+                x = self.preprocessor.format_segment(self._raw_signals[dataset_idx])
+            else:
+                x = self.preprocessor(self._raw_signals[dataset_idx], int(self.fs[dataset_idx]))
             num_segments = 1
 
         y = torch.tensor(float(label), dtype=torch.float32)
