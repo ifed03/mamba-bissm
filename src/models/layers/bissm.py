@@ -83,16 +83,16 @@ class BiSSM(nn.Module):
 
         xf = self.swish(self._causal_trim(self.conv_f(x_proj.transpose(1, 2)), L).transpose(1, 2))
         xrev = torch.flip(x_proj, dims=[1])
-        xb = self.swish(self._causal_trim(self.conv_b(xrev.transpose(1, 2)), L).transpose(1, 2))
-        xb = torch.flip(xb, dims=[1])
+        xb_rev = self.swish(self._causal_trim(self.conv_b(xrev.transpose(1, 2)), L).transpose(1, 2))
 
         Bf, Cf = self.B_f(xf), self.C_f(xf)
         Df = F.softplus(self.delta_f(xf) + self.delta_bias_f)
-        Bb, Cb = self.B_b(xb), self.C_b(xb)
-        Db = F.softplus(self.delta_b(xb) + self.delta_bias_b)
+        Bb_rev, Cb_rev = self.B_b(xb_rev), self.C_b(xb_rev)
+        Db_rev = F.softplus(self.delta_b(xb_rev) + self.delta_bias_b)
 
         yf = self._ssm_scan(xf, Bf, Cf, Df)
-        yb = self._ssm_scan(xb, Bb, Cb, Db)
+        yb_rev = self._ssm_scan(xb_rev, Bb_rev, Cb_rev, Db_rev)
+        yb = torch.flip(yb_rev, dims=[1])
 
         y = (yf + yb) * self.swish(z_proj)
         return self.out_proj(y)

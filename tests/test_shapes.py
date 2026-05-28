@@ -29,7 +29,7 @@ def test_model_shapes():
     mm = ECGMamba(mcfg)
     y2, f2 = mm(x)
     assert y2.shape == (2,)
-    assert f2.shape[0] == 2
+    assert f2.shape == (2, mm.d_model)
 
 
 def _small_ecgmamba_cfg():

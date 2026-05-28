@@ -27,6 +27,9 @@ TRAINING_HISTORY_COLUMNS = [
     "val_sensitivity",
     "val_specificity",
     "learning_rate",
+    "learning_rate_start",
+    "learning_rate_end",
+    "learning_rate_mean",
     "epoch_time_seconds",
     "best_checkpoint_this_epoch",
     "val_threshold",
@@ -44,10 +47,170 @@ def _select_best_val_metric(vm: dict) -> tuple[str, float]:
     return "f1_fallback", float(vm["f1"])
 
 
-def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_grad=1.0, scheduler=None, lr_history=None):
+def _json_scalar(value):
+    if isinstance(value, torch.Tensor):
+        value = value.detach().cpu().item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, str, int)):
+        return value
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if np.isnan(value):
+        return "nan"
+    if np.isposinf(value):
+        return "inf"
+    if np.isneginf(value):
+        return "-inf"
+    return value
+
+
+def _jsonable(value):
+    if isinstance(value, torch.Tensor):
+        flat = value.detach().cpu().reshape(-1)
+        return [_json_scalar(v) for v in flat]
+    if isinstance(value, np.ndarray):
+        return [_json_scalar(v) for v in value.reshape(-1)]
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return _json_scalar(value)
+
+
+def _tensor_summary(tensor: torch.Tensor) -> dict:
+    with torch.no_grad():
+        detached = tensor.detach()
+        finite_mask = torch.isfinite(detached)
+        finite_count = int(finite_mask.sum().item())
+        total_count = int(detached.numel())
+        summary = {
+            "shape": list(detached.shape),
+            "dtype": str(detached.dtype),
+            "device": str(detached.device),
+            "finite_count": finite_count,
+            "total_count": total_count,
+        }
+        if finite_count > 0:
+            finite_values = detached[finite_mask].float()
+            summary.update(
+                {
+                    "min": _json_scalar(finite_values.min()),
+                    "max": _json_scalar(finite_values.max()),
+                    "mean": _json_scalar(finite_values.mean()),
+                    "std": _json_scalar(finite_values.std(unbiased=False)),
+                }
+            )
+        else:
+            summary.update({"min": None, "max": None, "mean": None, "std": None})
+        return summary
+
+
+def _target_summary(target: torch.Tensor) -> dict:
+    summary = _tensor_summary(target)
+    with torch.no_grad():
+        unique = torch.unique(target.detach().cpu())
+    summary["unique_values"] = [_json_scalar(v) for v in unique]
+    return summary
+
+
+def _parameter_finite_check(model) -> dict:
+    checked = 0
+    for name, parameter in model.named_parameters():
+        checked += 1
+        with torch.no_grad():
+            if not bool(torch.isfinite(parameter.detach()).all().item()):
+                return {
+                    "all_checked_parameters_finite": False,
+                    "first_nonfinite_parameter": name,
+                    "checked_parameter_count": checked,
+                }
+    return {
+        "all_checked_parameters_finite": True,
+        "first_nonfinite_parameter": None,
+        "checked_parameter_count": checked,
+        "message": "all checked parameters are finite",
+    }
+
+
+def _gradient_finite_check(model) -> dict:
+    checked = 0
+    for name, parameter in model.named_parameters():
+        if parameter.grad is None:
+            continue
+        checked += 1
+        with torch.no_grad():
+            if not bool(torch.isfinite(parameter.grad.detach()).all().item()):
+                return {
+                    "checked": True,
+                    "all_checked_gradients_finite": False,
+                    "first_nonfinite_gradient": name,
+                    "checked_gradient_count": checked,
+                }
+    if checked == 0:
+        return {
+            "checked": False,
+            "reason": "no gradients had been computed when the nonfinite loss/logits were detected",
+        }
+    return {
+        "checked": True,
+        "all_checked_gradients_finite": True,
+        "first_nonfinite_gradient": None,
+        "checked_gradient_count": checked,
+    }
+
+
+def _write_nonfinite_diagnostics(
+    *,
+    run_dir: Path,
+    epoch_index: int,
+    batch_index: int,
+    optimizer,
+    amp_enabled: bool,
+    batch: dict,
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    logits: torch.Tensor,
+    loss: torch.Tensor,
+    model,
+) -> Path:
+    path = run_dir / f"nonfinite_diagnostics_epoch{epoch_index}_batch{batch_index}.json"
+    report = {
+        "epoch_index": int(epoch_index),
+        "batch_index": int(batch_index),
+        "learning_rate": _json_scalar(optimizer.param_groups[0]["lr"]),
+        "amp_enabled": bool(amp_enabled),
+        "input": _tensor_summary(inputs),
+        "target": _target_summary(targets),
+        "logits_before_loss": _tensor_summary(logits),
+        "loss_value": _json_scalar(loss.detach()),
+        "model_parameter_finite_check": _parameter_finite_check(model),
+        "gradient_finite_check": _gradient_finite_check(model),
+        "batch_record_ids": _jsonable(batch["record_id"]) if "record_id" in batch else None,
+        "batch_segment_indices": _jsonable(batch["segment_idx"]) if "segment_idx" in batch else None,
+    }
+    save_json(path, report)
+    return path
+
+
+def _run_epoch(
+    model,
+    loader,
+    optimizer,
+    criterion,
+    device,
+    scaler=None,
+    clip_grad=1.0,
+    scheduler=None,
+    lr_history=None,
+    run_dir: Path | None = None,
+    epoch_index: int = 0,
+):
     model.train()
     losses = []
-    for b in tqdm(loader, leave=False):
+    for batch_index, b in enumerate(tqdm(loader, leave=False)):
         x, y = b["x"].to(device), b["y"].to(device)
         optimizer.zero_grad()
 
@@ -55,26 +218,67 @@ def _run_epoch(model, loader, optimizer, criterion, device, scaler=None, clip_gr
             logit, _ = model(x)
             loss = criterion(logit, y.to(logit.device))
 
+        loss_value = float(loss.detach().item())
+        if (not bool(torch.isfinite(logit.detach()).all().item())) or (not bool(torch.isfinite(loss.detach()).item())):
+            optimizer.zero_grad(set_to_none=True)
+            if run_dir is None:
+                raise ValueError(
+                    f"nonfinite training loss/logits at epoch {epoch_index}, batch {batch_index}; "
+                    "no run_dir was provided for diagnostics"
+                )
+            diagnostic_path = _write_nonfinite_diagnostics(
+                run_dir=Path(run_dir),
+                epoch_index=epoch_index,
+                batch_index=batch_index,
+                optimizer=optimizer,
+                amp_enabled=scaler is not None,
+                batch=b,
+                inputs=x,
+                targets=y,
+                logits=logit,
+                loss=loss,
+                model=model,
+            )
+            print(
+                f"Nonfinite training loss/logits at epoch {epoch_index}, batch {batch_index}; "
+                f"diagnostics written to {diagnostic_path}"
+            )
+            raise ValueError(
+                f"nonfinite training loss/logits at epoch {epoch_index}, batch {batch_index}; "
+                f"diagnostics written to {diagnostic_path}"
+            )
+
+        update_applied = False
         if scaler is None:
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
-            optimizer.step()
-            if scheduler is not None:
-                scheduler.step()
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+            if bool(torch.isfinite(grad_norm).item()):
+                optimizer.step()
+                update_applied = True
+            else:
+                optimizer.zero_grad(set_to_none=True)
         else:
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
-            prev_scale = scaler.get_scale()
-            scaler.step(optimizer)
-            scaler.update()
-            # Only advance the scheduler after a successful optimizer update; GradScaler lowers the scale when it skips.
-            if scheduler is not None and scaler.get_scale() >= prev_scale:
-                scheduler.step()
-        if lr_history is not None:
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+            if bool(torch.isfinite(grad_norm).item()):
+                prev_scale = scaler.get_scale()
+                scaler.step(optimizer)
+                scaler.update()
+                # Only advance the scheduler after a successful optimizer update; GradScaler lowers the scale when it skips.
+                update_applied = scaler.get_scale() >= prev_scale
+            else:
+                optimizer.zero_grad(set_to_none=True)
+                scaler.update()
+
+        if scheduler is not None and update_applied:
+            scheduler.step()
+        if lr_history is not None and update_applied:
             lr_history.append(optimizer.param_groups[0]["lr"])
-        losses.append(loss.item())
-    return float(np.mean(losses))
+        losses.append(loss_value)
+
+    finite_losses = [loss for loss in losses if np.isfinite(loss)]
+    return float(np.mean(finite_losses)) if finite_losses else float("nan")
 
 
 def _save_predictions(path: Path, record_ids, y_true, y_prob, split: str):
@@ -103,6 +307,14 @@ def _save_segment_predictions(path: Path, segment_outputs: dict, split: str):
 
 
 def _save_training_history(path: Path, rows: list[dict]) -> None:
+    for row in rows:
+        epoch = row.get("epoch", "?")
+        try:
+            train_loss = float(row.get("train_loss"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"train_loss for epoch {epoch} must be numeric") from exc
+        if not np.isfinite(train_loss):
+            raise ValueError(f"train_loss for epoch {epoch} must be finite, got {train_loss}")
     pd.DataFrame(rows, columns=TRAINING_HISTORY_COLUMNS).to_csv(path, index=False)
 
 
@@ -135,6 +347,8 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
     for epoch in range(cfg["training"]["epochs"]):
         epoch_t0 = time.perf_counter()
         train_t0 = time.perf_counter()
+        epoch_lr_start = float(opt.param_groups[0]["lr"])
+        epoch_lr_history_start = len(lr_history)
         tr_loss = _run_epoch(
             model,
             train_loader,
@@ -145,7 +359,12 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
             cfg["training"]["grad_clip"],
             scheduler=sched,
             lr_history=lr_history,
+            run_dir=run_dir,
+            epoch_index=epoch,
         )
+        epoch_lrs = lr_history[epoch_lr_history_start:]
+        epoch_lr_end = float(opt.param_groups[0]["lr"])
+        epoch_lr_mean = float(np.mean(epoch_lrs)) if epoch_lrs else epoch_lr_end
         train_time_seconds = time.perf_counter() - train_t0
         val_t0 = time.perf_counter()
         _, val_record_outputs, _, _ = evaluate_record_level(model, val_loader, device, threshold=0.5)
@@ -183,7 +402,10 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
                 "val_accuracy": float(vm["accuracy"]),
                 "val_sensitivity": float(vm["sensitivity"]),
                 "val_specificity": float(vm["specificity"]),
-                "learning_rate": float(opt.param_groups[0]["lr"]),
+                "learning_rate": epoch_lr_end,
+                "learning_rate_start": epoch_lr_start,
+                "learning_rate_end": epoch_lr_end,
+                "learning_rate_mean": epoch_lr_mean,
                 "epoch_time_seconds": float(epoch_time_seconds),
                 "best_checkpoint_this_epoch": best_checkpoint_this_epoch,
                 "val_threshold": float(thr),

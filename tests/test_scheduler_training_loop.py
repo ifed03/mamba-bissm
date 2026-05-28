@@ -1,5 +1,7 @@
+import json
 import math
 
+import pytest
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
@@ -19,7 +21,12 @@ class TinyBatchDataset(Dataset):
     def __getitem__(self, idx):
         x = torch.tensor([[float(idx) + 1.0]])
         y = torch.tensor([[1.0 if idx % 2 == 0 else 0.0]])
-        return {"x": x, "y": y}
+        return {
+            "x": x,
+            "y": y,
+            "record_id": f"tiny-{idx}",
+            "segment_idx": torch.tensor(idx, dtype=torch.long),
+        }
 
 
 class TinyModel(torch.nn.Module):
@@ -120,6 +127,65 @@ def test_scheduler_step_after_optimizer_step_order():
         assert order[i + 1] == "scheduler"
 
 
+def test_lr_history_records_updated_param_group_learning_rates():
+    total_steps = 8
+    warmup_steps = 2
+    model, optimizer, scheduler, criterion, loader = _make_setup(total_steps=total_steps, warmup_steps=warmup_steps)
+    lr_history = []
+
+    _run_epoch(
+        model,
+        loader,
+        optimizer,
+        criterion,
+        device=torch.device("cpu"),
+        scaler=None,
+        clip_grad=1.0,
+        scheduler=scheduler,
+        lr_history=lr_history,
+    )
+
+    expected = [1e-3 * cosine_with_warmup(step, total_steps, warmup_steps) for step in range(1, len(loader) + 1)]
+    assert len(lr_history) == len(expected)
+    assert len(set(lr_history)) > 1
+    for actual, expected_lr in zip(lr_history, expected):
+        assert math.isclose(actual, expected_lr, rel_tol=1e-6, abs_tol=1e-12)
+    assert math.isclose(optimizer.param_groups[0]["lr"], lr_history[-1], rel_tol=1e-6, abs_tol=1e-12)
+
+
+def test_lr_history_omits_batches_without_optimizer_update():
+    order = []
+    model = TinyModel()
+    optimizer = RecordingAdamW(model.parameters(), lr=1e-3, weight_decay=1e-2, order=order)
+    scheduler = LambdaLR(optimizer, lambda s: cosine_with_warmup(s, total_steps=1, warmup_steps=0))
+    initial_lr = float(optimizer.param_groups[0]["lr"])
+    criterion = torch.nn.BCEWithLogitsLoss()
+    loader = DataLoader(TinyBatchDataset(n_batches=1), batch_size=1)
+    lr_history = []
+    hook = model.linear.weight.register_hook(lambda grad: torch.full_like(grad, float("inf")))
+
+    try:
+        loss = _run_epoch(
+            model,
+            loader,
+            optimizer,
+            criterion,
+            device=torch.device("cpu"),
+            scaler=None,
+            clip_grad=1.0,
+            scheduler=scheduler,
+            lr_history=lr_history,
+        )
+    finally:
+        hook.remove()
+
+    assert math.isfinite(loss)
+    assert order == []
+    assert scheduler.last_epoch == 0
+    assert lr_history == []
+    assert math.isclose(optimizer.param_groups[0]["lr"], initial_lr, rel_tol=1e-9)
+
+
 def test_run_epoch_with_amp_disabled_on_cpu_still_works():
     model, optimizer, scheduler, criterion, loader = _make_setup(total_steps=4, warmup_steps=1)
     loss = _run_epoch(
@@ -134,6 +200,69 @@ def test_run_epoch_with_amp_disabled_on_cpu_still_works():
         lr_history=[],
     )
     assert math.isfinite(loss)
+
+
+def test_run_epoch_writes_diagnostics_and_raises_on_nonfinite_loss(tmp_path):
+    order = []
+    model = TinyModel()
+    optimizer = RecordingAdamW(model.parameters(), lr=1e-3, weight_decay=1e-2, order=order)
+    scheduler = LambdaLR(optimizer, lambda s: cosine_with_warmup(s, total_steps=2, warmup_steps=1))
+    loader = DataLoader(TinyBatchDataset(n_batches=2), batch_size=1)
+    bce = torch.nn.BCEWithLogitsLoss()
+    calls = {"n": 0}
+
+    def criterion(logit, target):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return logit.sum() * torch.tensor(float("nan"), device=logit.device)
+        return bce(logit, target)
+
+    with pytest.raises(ValueError, match="nonfinite training loss/logits at epoch 3, batch 0"):
+        _run_epoch(
+            model,
+            loader,
+            optimizer,
+            criterion,
+            device=torch.device("cpu"),
+            scaler=None,
+            clip_grad=1.0,
+            scheduler=scheduler,
+            lr_history=[],
+            run_dir=tmp_path,
+            epoch_index=3,
+        )
+
+    diagnostic_path = tmp_path / "nonfinite_diagnostics_epoch3_batch0.json"
+    assert diagnostic_path.exists()
+    diagnostic = json.loads(diagnostic_path.read_text())
+    for key in [
+        "epoch_index",
+        "batch_index",
+        "learning_rate",
+        "amp_enabled",
+        "input",
+        "target",
+        "logits_before_loss",
+        "loss_value",
+        "model_parameter_finite_check",
+        "gradient_finite_check",
+        "batch_record_ids",
+        "batch_segment_indices",
+    ]:
+        assert key in diagnostic
+    assert diagnostic["epoch_index"] == 3
+    assert diagnostic["batch_index"] == 0
+    assert diagnostic["loss_value"] == "nan"
+    assert diagnostic["amp_enabled"] is False
+    assert diagnostic["input"]["finite_count"] == diagnostic["input"]["total_count"]
+    assert diagnostic["target"]["unique_values"] == [1.0]
+    assert diagnostic["logits_before_loss"]["finite_count"] == diagnostic["logits_before_loss"]["total_count"]
+    assert diagnostic["model_parameter_finite_check"]["all_checked_parameters_finite"] is True
+    assert diagnostic["gradient_finite_check"]["checked"] is False
+    assert diagnostic["batch_record_ids"] == ["tiny-0"]
+    assert diagnostic["batch_segment_indices"] == [0]
+    assert order == []
+    assert scheduler.last_epoch == 0
 
 
 def test_best_metric_selection_uses_auroc_when_defined():
