@@ -43,6 +43,11 @@ def _dry_metrics_filename(noise_type: str, snr_db: float) -> str:
 
 
 def _write_predictions(run_dir: Path, val_records, test_records, val_segments, test_segments) -> None:
+<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
+    import pandas as pd
+
+=======
+>>>>>>> main
     pd.DataFrame(
         {"record_id": val_records["record_id"], "y_true": val_records["y_true"].astype(int), "y_prob": val_records["y_prob"], "split": "val"}
     ).to_parquet(run_dir / "preds_val.parquet", index=False)
@@ -57,7 +62,14 @@ def _write_predictions(run_dir: Path, val_records, test_records, val_segments, t
     ).to_parquet(run_dir / "preds_segments.parquet", index=False)
 
 
+<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
+def _load_model_from_checkpoint(cfg: dict, checkpoint: str, device):
+    from models import build_model
+    from train.checkpointing import load_checkpoint
+
+=======
 def _load_model_from_checkpoint(cfg: dict, checkpoint: str, device: torch.device):
+>>>>>>> main
     checkpoint_path = Path(checkpoint)
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Checkpoint is required and was not found: {checkpoint_path}")
@@ -157,8 +169,11 @@ def main():
         validate_nstdb_root,
     )
     from evaluate.plots import save_plots
+<<<<<<< codex/add-zero-shot-noise-evaluation-pathway-f6qe3i
+=======
     from models import build_model
     from train.checkpointing import load_checkpoint
+>>>>>>> main
     from train.metrics import choose_threshold_max_f1, compute_metrics
     from utils.config import load_config
     from utils.logging import save_json
