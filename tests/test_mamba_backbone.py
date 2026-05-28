@@ -27,7 +27,8 @@ def test_bimamba_backbone_shape_and_backward():
     assert x.grad is not None
 
 
-def test_ecgmamba_bimamba_cpu_dummy_forward():
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="mamba_ssm fast path requires CUDA")
+def test_ecgmamba_bimamba_cuda_dummy_forward():
     pytest.importorskip("mamba_ssm")
     from models import build_model
 
@@ -46,9 +47,9 @@ def test_ecgmamba_bimamba_cpu_dummy_forward():
             "use_layernorm": True,
         }
     }
-    model = build_model(cfg).to("cpu")
+    model = build_model(cfg).to("cuda")
     model.eval()
-    x = torch.randn(2, 1, 400)
+    x = torch.randn(2, 1, 400, device="cuda")
 
     with torch.no_grad():
         logits, pooled = model(x)
