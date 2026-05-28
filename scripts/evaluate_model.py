@@ -57,12 +57,15 @@ def _write_predictions(run_dir: Path, val_records, test_records, val_segments, t
     ).to_parquet(run_dir / "preds_segments.parquet", index=False)
 
 
-def _load_model_from_checkpoint(cfg: dict, checkpoint: str, device: torch.device):
+def _load_model_from_checkpoint(cfg: dict, checkpoint: str, device):
+    from models import build_model
+    from train.checkpointing import load_checkpoint
+
     checkpoint_path = Path(checkpoint)
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Checkpoint is required and was not found: {checkpoint_path}")
     model = build_model(cfg)
-    load_checkpoint(checkpoint_path, model)
+    load_checkpoint(checkpoint_path, model, cfg=cfg)
     model.to(device)
     return model
 
