@@ -25,3 +25,35 @@ def test_bimamba_backbone_shape_and_backward():
     assert out.shape == x.shape
     out.sum().backward()
     assert x.grad is not None
+
+
+def test_ecgmamba_bimamba_cpu_dummy_forward():
+    pytest.importorskip("mamba_ssm")
+    from models import build_model
+
+    cfg = {
+        "model": {
+            "name": "bimamba",
+            "backbone": "bimamba",
+            "d_model": 16,
+            "n_layers": 1,
+            "dropout": 0.0,
+            "d_state": 4,
+            "d_conv": 3,
+            "expand": 2,
+            "use_fast_path": True,
+            "use_encoder": True,
+            "use_layernorm": True,
+        }
+    }
+    model = build_model(cfg).to("cpu")
+    model.eval()
+    x = torch.randn(2, 1, 400)
+
+    with torch.no_grad():
+        logits, pooled = model(x)
+
+    assert logits.shape == (2,)
+    assert pooled.shape == (2, 16)
+    assert torch.isfinite(logits).all()
+    assert torch.isfinite(pooled).all()
