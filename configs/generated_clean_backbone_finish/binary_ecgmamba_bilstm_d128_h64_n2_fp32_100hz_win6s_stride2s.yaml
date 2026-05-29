@@ -1,0 +1,45 @@
+paths:
+  data_path: data/cpsc_2018_labeled_single_lead.parquet
+  splits_dir: splits/
+  runs_dir: runs/
+split:
+  method: holdout
+  seed: 42
+  group_id_col: record_id
+  train_ratio: 0.7
+  val_ratio: 0.1
+preprocessing:
+  fs_target: 100
+  target_seconds: 6.0
+  normalize: zscore
+  windowing:
+    enabled: true
+    window_seconds: 6.0
+    stride_seconds: 2.0
+    pad_remainder: false
+model:
+  name: ecgmamba
+  backbone: bilstm
+  d_model: 128
+  n_layers: 2
+  dropout: 0.1
+  lstm_hidden_size: 64
+  lstm_num_layers: 2
+  lstm_dropout: 0.1
+  lstm_bidirectional: true
+  lstm_layernorm: true
+  use_encoder: true
+  use_layernorm: true
+training:
+  batch_size: 16
+  epochs: 50
+  lr: 0.001
+  weight_decay: 0.05
+  warmup_ratio: 0.05
+  patience: 10
+  grad_clip: 1.0
+  mixed_precision: false
+  weighted_sampler: false
+  deterministic: true
+eval:
+  tsne: false

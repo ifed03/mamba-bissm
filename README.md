@@ -61,7 +61,7 @@ Train with official Mamba backbone variants:
 
 ```bash
 python scripts/train_model.py --config configs/mamba.yaml
-python scripts/train_model.py --config configs/bimamba.yaml
+python scripts/train_model.py --config configs/bimamba_d128_n8_s16_fastpath_amp_100hz_win10s.yaml
 ```
 
 You can also pass a run name explicitly:
