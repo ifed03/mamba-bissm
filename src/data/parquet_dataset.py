@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import Dataset, Sampler
 
 from .transforms import ECGPreprocessor, TransformConfig
-from evaluate.noise_protocol import ZeroShotNoiseInjector, ensure_clean_split
+from evaluate.noise_protocol import NoisyInputNoiseInjector, ZeroShotNoiseInjector, ensure_clean_split
 
 
 class RecordBatchSampler(Sampler[list[int]]):
@@ -16,6 +16,17 @@ class RecordBatchSampler(Sampler[list[int]]):
 
     def __iter__(self):
         yield from self.record_batches
+
+    def _warn_if_snr_deviates(self, meta: dict) -> None:
+        requested = float(meta.get("snr_db", 0.0))
+        measured = float(meta.get("measured_snr_db", requested))
+        if abs(measured - requested) > self.noise_snr_tolerance_db:
+            print(
+                "WARNING: measured SNR deviates from requested SNR: "
+                f"record_id={meta.get('record_id')}, split={meta.get('split')}, "
+                f"requested={requested:g} dB, measured={measured:g} dB, "
+                f"tolerance={self.noise_snr_tolerance_db:g} dB"
+            )
 
     def __len__(self):
         return len(self.record_batches)
@@ -50,9 +61,17 @@ class ParquetECGDataset(Dataset):
         self.noise_metadata = []
         self.noise_injector = None
         noise_cfg = dict(noise_cfg or {})
+        self.noise_snr_tolerance_db = float(noise_cfg.get("snr_tolerance_db", 0.25)) if noise_cfg else 0.25
         if noise_cfg.get("enabled", False):
-            ensure_clean_split(split_name or "")
-            self.noise_injector = ZeroShotNoiseInjector(
+            noise_mode = noise_cfg.get("mode", "zero-shot")
+            if noise_mode == "zero-shot":
+                ensure_clean_split(split_name or "")
+                injector_cls = ZeroShotNoiseInjector
+            elif noise_mode == "noisy-input":
+                injector_cls = NoisyInputNoiseInjector
+            else:
+                raise ValueError(f"Unknown noise injection mode {noise_mode!r}; expected 'zero-shot' or 'noisy-input'.")
+            self.noise_injector = injector_cls(
                 noise_type=noise_cfg["noise_type"],
                 snr_db=noise_cfg["snr_db"],
                 base_seed=noise_cfg.get("base_seed", 123),
@@ -100,6 +119,9 @@ class ParquetECGDataset(Dataset):
                 signal = self.preprocessor.prepare_signal(all_xs[row_idx], fs)
                 if self.noise_injector is not None:
                     signal, meta = self.noise_injector.inject(signal, record_id=record_id, split=self.split_name or "test")
+                    meta["original_label"] = label
+                    meta["processing_order"] = "resample->noise->window->normalize"
+                    self._warn_if_snr_deviates(meta)
                     self.noise_metadata.append(meta)
                 self._signals.append(signal)
                 stride_len = int(round(self.stride_seconds * self.preprocessor.cfg.fs_target))
@@ -122,6 +144,9 @@ class ParquetECGDataset(Dataset):
                 if self.noise_injector is not None:
                     signal = self.preprocessor.prepare_signal(all_xs[row_idx], fs)
                     signal, meta = self.noise_injector.inject(signal, record_id=record_id, split=self.split_name or "test")
+                    meta["original_label"] = label
+                    meta["processing_order"] = "resample->noise->crop_or_window->normalize"
+                    self._warn_if_snr_deviates(meta)
                     self.noise_metadata.append(meta)
                     self._raw_signals.append(signal.tolist())
                 else:
@@ -134,6 +159,17 @@ class ParquetECGDataset(Dataset):
                 by_record[record_id].append(sample_idx)
 
         self.record_batches = list(by_record.values())
+
+    def _warn_if_snr_deviates(self, meta: dict) -> None:
+        requested = float(meta.get("snr_db", 0.0))
+        measured = float(meta.get("measured_snr_db", requested))
+        if abs(measured - requested) > self.noise_snr_tolerance_db:
+            print(
+                "WARNING: measured SNR deviates from requested SNR: "
+                f"record_id={meta.get('record_id')}, split={meta.get('split')}, "
+                f"requested={requested:g} dB, measured={measured:g} dB, "
+                f"tolerance={self.noise_snr_tolerance_db:g} dB"
+            )
 
     def __len__(self):
         return len(self._samples)
