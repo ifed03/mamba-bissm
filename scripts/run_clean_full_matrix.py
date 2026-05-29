@@ -20,7 +20,7 @@ def controlled_ecgmamba_backbone_configs() -> list[str]:
     for w in WINDOWS:
         configs.append(f"configs/binary_mamba_d64_n2_s16_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
-        configs.append(f"configs/binary_bimamba_2layer_100hz_win{w}s_stride2s.yaml")
+        configs.append(f"configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
         configs.append(f"configs/binary_ecgmamba_bilstm_d64_n2_100hz_win{w}s_stride2s.yaml")
     return configs

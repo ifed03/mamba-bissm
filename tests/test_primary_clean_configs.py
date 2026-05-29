@@ -19,10 +19,10 @@ def test_primary_clean_configs_window_shapes_and_stride():
         "configs/binary_bilstm_100hz_win6s_stride2s.yaml": 6.0,
         "configs/binary_bilstm_100hz_win8s_stride2s.yaml": 8.0,
         "configs/binary_bilstm_100hz_win10s_stride2s.yaml": 10.0,
-        "configs/binary_bimamba_2layer_100hz_win4s_stride2s.yaml": 4.0,
-        "configs/binary_bimamba_2layer_100hz_win6s_stride2s.yaml": 6.0,
-        "configs/binary_bimamba_2layer_100hz_win8s_stride2s.yaml": 8.0,
-        "configs/binary_bimamba_2layer_100hz_win10s_stride2s.yaml": 10.0,
+        "configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win4s_stride2s.yaml": 4.0,
+        "configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win6s_stride2s.yaml": 6.0,
+        "configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win8s_stride2s.yaml": 8.0,
+        "configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win10s_stride2s.yaml": 10.0,
         "configs/binary_ecgmamba_bilstm_d64_n2_100hz_win4s_stride2s.yaml": 4.0,
         "configs/binary_ecgmamba_bilstm_d64_n2_100hz_win6s_stride2s.yaml": 6.0,
         "configs/binary_ecgmamba_bilstm_d64_n2_100hz_win8s_stride2s.yaml": 8.0,
@@ -54,15 +54,16 @@ def test_controlled_ecgmamba_backbone_configs_share_frontend_settings():
     paths_by_backbone = {
         "bissm": "configs/binary_bissm_d64_n2_s64_100hz_win4s_stride2s.yaml",
         "mamba": "configs/binary_mamba_d64_n2_s16_100hz_win4s_stride2s.yaml",
-        "bimamba": "configs/binary_bimamba_2layer_100hz_win4s_stride2s.yaml",
+        "bimamba": "configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win4s_stride2s.yaml",
         "bilstm": "configs/binary_ecgmamba_bilstm_d64_n2_100hz_win4s_stride2s.yaml",
     }
 
     configs = {name: load_config(path) for name, path in paths_by_backbone.items()}
     reference = configs["bissm"]
+    expected_d_model = {"bissm": 64, "mamba": 64, "bimamba": 128, "bilstm": 64}
     for name, cfg in configs.items():
         assert cfg["model"]["backbone"] == name
-        assert cfg["model"]["d_model"] == reference["model"]["d_model"]
+        assert cfg["model"]["d_model"] == expected_d_model[name]
         assert cfg["model"]["dropout"] == reference["model"]["dropout"]
         assert cfg["model"]["use_encoder"] is True
         assert cfg["preprocessing"] == reference["preprocessing"]
