@@ -135,3 +135,95 @@ def test_ecgmamba_bilstm_backbone_shapes_and_baseline_unchanged():
     assert baseline.lstm.input_size == 1
     assert baseline_logits.shape == (2,)
     assert baseline_features.shape == (2, 16)
+
+
+def _small_cnn1d_cfg():
+    return {
+        "model": {
+            "name": "cnn1d",
+            "in_channels": 1,
+            "cnn_channels": [8, 16, 32],
+            "cnn_kernel_size": 7,
+            "cnn_stride": 2,
+            "cnn_dropout": 0.1,
+            "cnn_batchnorm": True,
+        }
+    }
+
+
+def test_cnn1d_baseline_shapes_and_finite_outputs():
+    model = CNNBaseline(_small_cnn1d_cfg())
+    x = torch.randn(2, 1, 400)
+    logit, features = model(x)
+
+    assert logit.shape == (2,)
+    assert features.ndim == 2
+    assert features.shape == (2, 32)
+    assert torch.isfinite(logit).all()
+    assert torch.isfinite(features).all()
+
+
+def test_cnn1d_baseline_accepts_unbatched_channel_input():
+    model = CNNBaseline(_small_cnn1d_cfg())
+    x = torch.randn(2, 400)
+    logit, features = model(x)
+
+    assert logit.shape == (2,)
+    assert features.shape == (2, 32)
+
+
+def test_cnn1d_baseline_variable_lengths():
+    model = CNNBaseline(_small_cnn1d_cfg())
+    model.eval()
+
+    for seq_len in [400, 600, 1000]:
+        x = torch.randn(2, 1, seq_len)
+        with torch.no_grad():
+            logit, features = model(x)
+
+        assert logit.shape == (2,)
+        assert features.shape == (2, 32)
+        assert torch.isfinite(logit).all()
+        assert torch.isfinite(features).all()
+
+
+def test_cnn1d_baseline_backward_has_finite_gradient():
+    model = CNNBaseline(_small_cnn1d_cfg())
+    x = torch.randn(2, 1, 400)
+    y = torch.tensor([1.0, 0.0], dtype=torch.float32)
+    logit, _ = model(x)
+    loss = torch.nn.functional.binary_cross_entropy_with_logits(logit, y)
+    loss.backward()
+
+    grads = [p.grad for p in model.parameters() if p.grad is not None]
+    assert grads
+    assert any(
+        torch.isfinite(g).all() and torch.count_nonzero(g).item() > 0 for g in grads
+    )
+
+
+def test_build_model_routes_cnn1d_bilstm_and_ecgmamba_bilstm_backbone():
+    from models import build_model
+    from models.lstm_baseline import BiLSTMBaseline
+
+    cnn = build_model(_small_cnn1d_cfg())
+    assert isinstance(cnn, CNNBaseline)
+
+    bilstm = build_model(
+        {
+            "model": {
+                "name": "bilstm",
+                "hidden_size": 8,
+                "num_layers": 1,
+                "bidirectional": True,
+                "dropout": 0.0,
+                "pooling": "mean",
+            }
+        }
+    )
+    assert isinstance(bilstm, BiLSTMBaseline)
+
+    ecgmamba_bilstm = build_model(_small_ecgmamba_bilstm_cfg())
+    assert isinstance(ecgmamba_bilstm, ECGMamba)
+    assert not isinstance(ecgmamba_bilstm, BiLSTMBaseline)
+    assert ecgmamba_bilstm.backbone_name == "bilstm"
