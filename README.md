@@ -117,6 +117,52 @@ outputs/zero_shot_noise_sweep/zero_shot_noise_summary.csv
 outputs/zero_shot_noise_sweep/zero_shot_noise_summary.json
 ```
 
+
+## Noisy-input training/evaluation
+
+The noisy-input protocol trains, validates, and tests with deterministic NSTDB
+noise applied to every split. Noise is injected dynamically after ECG resampling
+to 100 Hz and before window extraction and per-window normalization, preserving
+the clean parquet dataset and the original train/validation/test membership.
+The noisy validation split is used for both checkpoint selection and validation
+threshold (`tau*`) selection; that noisy-validation `tau*` is then applied to
+the matching noisy test condition. Supported NSTDB noise labels are `bw`, `em`,
+and `ma`; the default SNR list is `24 18 12 6 0 -6`.
+
+Dry-run the noisy-input matrix without writing outputs:
+
+```bash
+python scripts/train_model.py \
+  --config configs/binary_ecgmamba_100hz.yaml \
+  --noise-training-mode noisy-input \
+  --noise-root data \
+  --noise-types bw em ma \
+  --snr-db 24 18 12 6 0 -6 \
+  --base-seed 123 \
+  --ecg-fs 100 \
+  --output-root runs/noisy_input_training \
+  --dry-run
+```
+
+Run one noisy-input condition:
+
+```bash
+python scripts/train_model.py \
+  --config configs/binary_ecgmamba_100hz.yaml \
+  --noise-training-mode noisy-input \
+  --noise-root data \
+  --noise-types bw \
+  --snr-db 18 \
+  --base-seed 123 \
+  --ecg-fs 100 \
+  --output-root runs/noisy_input_training
+```
+
+Per-condition run directories are named like
+`noisy_input_training_<noise_type>_<snr>dB` and contain unambiguous files such
+as `metrics_noisy-input-training_noise_type=bw__snr_db=18.json` and
+`threshold_noisy-input-training_noise_type=bw__snr_db=18.json`.
+
 ## Sweep (baseline + ECGMamba + ablations via config toggles)
 
 ```bash

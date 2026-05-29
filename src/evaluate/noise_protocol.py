@@ -1,9 +1,11 @@
-"""Protocol helpers for zero-shot noisy-test evaluation.
+"""Protocol helpers for controlled NSTDB noise evaluation and training.
 
-This module enforces that noisy evaluation is test-only and that model/threshold
-selection remains based on clean validation only. Noise is applied to the
-already-resampled ECG signal, before window extraction and per-window
-normalisation in :mod:`data.parquet_dataset`.
+Zero-shot noisy-test evaluation remains test-only and uses clean validation for
+checkpoint and threshold selection. Noisy-input training/evaluation uses noisy
+train, validation, and test splits; noisy validation drives checkpoint and
+threshold selection. In both protocols, noise is applied to the already
+resampled ECG signal before window extraction and per-window normalisation in
+:mod:`data.parquet_dataset`.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ DEFAULT_NOISE_ROOT = Path("data")
 DEFAULT_SNR_DB = [24.0, 18.0, 12.0, 6.0, 0.0, -6.0]
 REQUIRED_NSTDB_FILES = ("bw.hea", "bw.dat", "em.hea", "em.dat", "ma.hea", "ma.dat")
 ZERO_SHOT_EVAL_NAME = "zero-shot"
+NOISY_INPUT_TRAINING_NAME = "noisy-input-training"
+NOISY_INPUT_THRESHOLD_SOURCE = "noisy_val"
+NOISY_INPUT_CHECKPOINT_SOURCE = "noisy_val"
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,19 @@ def metrics_filename(condition: NoiseCondition) -> str:
     return f"metrics_{ZERO_SHOT_EVAL_NAME}_{condition_key(condition)}.json"
 
 
+def noisy_input_condition_name(condition: NoiseCondition) -> str:
+    snr = f"{condition.snr_db:g}".replace("-", "neg")
+    return f"noisy_input_training_{condition.noise_type}_{snr}dB"
+
+
+def noisy_input_metrics_filename(condition: NoiseCondition) -> str:
+    return f"metrics_{NOISY_INPUT_TRAINING_NAME}_{condition_key(condition)}.json"
+
+
+def noisy_input_threshold_filename(condition: NoiseCondition) -> str:
+    return f"threshold_{NOISY_INPUT_TRAINING_NAME}_{condition_key(condition)}.json"
+
+
 def ensure_clean_split(split_name: str) -> None:
     if split_name != "test":
         raise ValueError(f"Noise injection is only allowed for test split, got split={split_name!r}.")
@@ -78,7 +96,6 @@ def ensure_clean_split(split_name: str) -> None:
 def deterministic_example_seed(
     *, base_seed: int, record_id: str, split: str, noise_type: str, snr_db: float
 ) -> int:
-    ensure_clean_split(split)
     validate_noise_type(noise_type)
     payload = json.dumps(
         {
@@ -127,8 +144,11 @@ def condition_output_dir(root: str | Path, condition: NoiseCondition) -> Path:
     return Path(root) / condition_key(condition)
 
 
-class ZeroShotNoiseInjector:
-    """Deterministic ECG noise injector for the test split only."""
+class _BaseDeterministicNoiseInjector:
+    """Deterministic ECG noise injector applied after ECG resampling."""
+
+    threshold_source = "unspecified"
+    checkpoint_source = "unspecified"
 
     def __init__(
         self,
@@ -155,8 +175,11 @@ class ZeroShotNoiseInjector:
         self.noise_original_fs = float(source_fs)
         self.noise = resample_noise(np.asarray(noise, dtype=np.float64), self.noise_original_fs, self.target_fs)
 
+    def _validate_split(self, split: str) -> None:
+        return None
+
     def inject(self, clean_resampled_ecg: np.ndarray, *, record_id: str, split: str = "test"):
-        ensure_clean_split(split)
+        self._validate_split(split)
         seed = deterministic_example_seed(
             base_seed=self.base_seed,
             record_id=str(record_id),
@@ -176,24 +199,44 @@ class ZeroShotNoiseInjector:
             noise_original_fs=self.noise_original_fs,
             target_fs=self.target_fs,
         )
-        metadata = metadata_for_noisy_example(
-            base_metadata={
-                "record_id": str(record_id),
-                "original_record_id": str(record_id),
-                "seed": seed,
-                "noise_channel": channel,
-                "noise_start_index": start,
-                "measured_snr_db": noise_meta["measured_snr_db"],
-            },
-            split=split,
-            condition=self.condition,
-            threshold_source="clean_val",
-            checkpoint_source="clean_val",
-        )
+        metadata = {
+            "record_id": str(record_id),
+            "original_record_id": str(record_id),
+            "split": split,
+            "noise_type": self.condition.noise_type,
+            "snr_db": float(self.condition.snr_db),
+            "seed": int(seed),
+            "noise_channel": int(channel),
+            "noise_start_index": int(start),
+            "measured_snr_db": float(noise_meta["measured_snr_db"]),
+            "threshold_source": self.threshold_source,
+            "checkpoint_source": self.checkpoint_source,
+        }
         metadata.update(noise_meta)
-        metadata["split"] = "test"
+        metadata["split"] = split
         metadata["original_record_id"] = str(record_id)
         return noisy, metadata
+
+
+class ZeroShotNoiseInjector(_BaseDeterministicNoiseInjector):
+    """Deterministic ECG noise injector for the test split only."""
+
+    threshold_source = "clean_val"
+    checkpoint_source = "clean_val"
+
+    def _validate_split(self, split: str) -> None:
+        ensure_clean_split(split)
+
+
+class NoisyInputNoiseInjector(_BaseDeterministicNoiseInjector):
+    """Deterministic ECG noise injector for noisy-input train/val/test runs."""
+
+    threshold_source = NOISY_INPUT_THRESHOLD_SOURCE
+    checkpoint_source = NOISY_INPUT_CHECKPOINT_SOURCE
+
+    def _validate_split(self, split: str) -> None:
+        if split not in {"train", "val", "test"}:
+            raise ValueError(f"noisy-input noise injection requires split to be train, val, or test; got {split!r}.")
 
 
 def load_clean_threshold(path: str | Path) -> float:

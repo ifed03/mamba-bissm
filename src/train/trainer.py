@@ -9,6 +9,13 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 from evaluate.evaluator import evaluate_record_level
+from evaluate.noise_protocol import (
+    NOISY_INPUT_CHECKPOINT_SOURCE,
+    NOISY_INPUT_THRESHOLD_SOURCE,
+    condition_key,
+    noisy_input_metrics_filename,
+    noisy_input_threshold_filename,
+)
 from evaluate.plots import save_plots
 from train.checkpointing import save_checkpoint
 from train.losses import make_bce_loss
@@ -319,6 +326,14 @@ def _save_training_history(path: Path, rows: list[dict]) -> None:
 
 
 def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path):
+    noise_condition = getattr(getattr(val_loader, "dataset", None), "noise_injector", None)
+    noisy_input_condition = getattr(noise_condition, "condition", None)
+    is_noisy_input = noise_condition is not None and getattr(noise_condition, "threshold_source", None) == NOISY_INPUT_THRESHOLD_SOURCE
+    threshold_source = NOISY_INPUT_THRESHOLD_SOURCE if is_noisy_input else "clean_val"
+    checkpoint_source = NOISY_INPUT_CHECKPOINT_SOURCE if is_noisy_input else "clean_val"
+    validation_split_name = "noisy validation" if is_noisy_input else "clean validation"
+    print(f"Checkpoint selection uses {validation_split_name} split (source={checkpoint_source}).")
+    print(f"Threshold selection tau* uses {validation_split_name} split (source={threshold_source}).")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -464,11 +479,44 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
         "training_time_seconds": float(training_time_seconds),
         "mean_epoch_time_seconds": float(np.mean(epoch_times)) if epoch_times else 0.0,
     }
-    save_json(run_dir / "clean_validation_threshold.json", {
+    threshold_payload = {
         "threshold": float(thr),
-        "threshold_source": "clean_val",
-        "checkpoint_source": "clean_val",
+        "threshold_source": threshold_source,
+        "checkpoint_source": checkpoint_source,
         "checkpoint": str(best_ckpt_path),
-    })
+    }
+    if noisy_input_condition is not None:
+        threshold_payload.update(
+            {
+                "training_mode": "noisy-input",
+                "condition": condition_key(noisy_input_condition),
+                "noise_type": noisy_input_condition.noise_type,
+                "snr_db": float(noisy_input_condition.snr_db),
+            }
+        )
+        out.update(
+            {
+                "training_mode": "noisy-input",
+                "condition": condition_key(noisy_input_condition),
+                "noise_type": noisy_input_condition.noise_type,
+                "snr_db": float(noisy_input_condition.snr_db),
+                "threshold_source": threshold_source,
+                "checkpoint_source": checkpoint_source,
+                "noise_metadata": {
+                    "train": getattr(train_loader.dataset, "noise_metadata", []),
+                    "val": getattr(val_loader.dataset, "noise_metadata", []),
+                    "test": getattr(test_loader.dataset, "noise_metadata", []),
+                },
+            }
+        )
+        save_json(run_dir / noisy_input_threshold_filename(noisy_input_condition), threshold_payload)
+        save_json(run_dir / noisy_input_metrics_filename(noisy_input_condition), out)
+    else:
+        save_json(run_dir / "clean_validation_threshold.json", threshold_payload)
     save_json(run_dir / "metrics.json", out)
+    print(
+        "End-of-run summary: "
+        f"processed={len(train_loader.dataset.record_ids) + len(val_loader.dataset.record_ids) + len(test_loader.dataset.record_ids)}, "
+        f"failures=0, output={run_dir}, selected_checkpoint={best_ckpt_path}, tau*={float(thr)}"
+    )
     return out
