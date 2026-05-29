@@ -1,5 +1,5 @@
 from .cnn_baseline import CNNBaseline
-from .ecgmamba import ECGMamba
+from .ecgmamba import BiLSTMBackbone, ECGMamba
 from .lstm_baseline import BiLSTMBaseline
 from .mamba_backbone import BiMambaBackbone, MambaBackbone
 
@@ -18,6 +18,7 @@ def build_model(cfg: dict):
 __all__ = [
     "CNNBaseline",
     "ECGMamba",
+    "BiLSTMBackbone",
     "BiLSTMBaseline",
     "MambaBackbone",
     "BiMambaBackbone",
