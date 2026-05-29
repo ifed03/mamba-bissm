@@ -15,15 +15,15 @@ WINDOWS = (4, 6, 8, 10)
 def clean_matrix_configs() -> list[str]:
     configs: list[str] = []
     for w in WINDOWS:
-        configs.append(f"configs/binary_bissm_reduced2_100hz_win{w}s_stride2s.yaml")
+        configs.append(f"configs/binary_bissm_d64_n2_s64_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
-        configs.append(f"configs/binary_bissm_reduced4_100hz_win{w}s_stride2s.yaml")
+        configs.append(f"configs/binary_bissm_d64_n4_s64_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
         configs.append(f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
-        configs.append(f"configs/binary_mamba_2layer_100hz_win{w}s_stride2s.yaml")
+        configs.append(f"configs/binary_mamba_d64_n2_s16_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
-        configs.append(f"configs/binary_mamba_4layer_100hz_win{w}s_stride2s.yaml")
+        configs.append(f"configs/binary_mamba_d64_n4_s16_100hz_win{w}s_stride2s.yaml")
     return configs
 
 

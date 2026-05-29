@@ -88,7 +88,7 @@ python scripts/evaluate_model.py --config configs/binary_ecgmamba_100hz.yaml --c
 python scripts/sweep.py --configs configs/binary_cnn_baseline_100hz.yaml configs/binary_ecgmamba_100hz.yaml configs/binary_ecgmamba_500hz.yaml
 ```
 
-Run the full clean-data 20-run AF/NSR matrix (reduced BiSSM 2/4, BiLSTM, Mamba 2/4 across 4/6/8/10s):
+Run the full clean-data 20-run AF/NSR matrix (BiSSM d64_n2/d64_n4, BiLSTM, Mamba d64_n2/d64_n4 across 4/6/8/10s):
 
 ```bash
 python scripts/run_clean_full_matrix.py
@@ -96,36 +96,23 @@ python scripts/run_clean_full_matrix.py
 
 
 Specific sweep for:
-- smaller ECG-Mamba implementation across 4/6/8/10s windows
-- larger ECG-Mamba parameter version across 4/6/8/10s windows
-- larger BiSSM parameter count at 10s only
+- 2-layer BiSSM, state_dim 32 across 4/6/8/10s windows
+- full-size ECGMamba BiSSM across 4/6/8/10s windows
+- 4-layer BiSSM, state_dim 64 at 10s only
 
-```bash
-make sweep_window_ablation
-```
-
-Equivalent direct command:
+Direct command:
 
 ```bash
 python scripts/sweep.py --results runs/sweeps/window_ablation_ecgmamba_mamba_bissm.csv --configs \
-  configs/binary_ecgmamba_reduced_100hz_win4s_stride2s.yaml \
-  configs/binary_ecgmamba_reduced_100hz_win6s_stride2s.yaml \
-  configs/binary_ecgmamba_reduced_100hz_win8s_stride2s.yaml \
-  configs/binary_ecgmamba_reduced_100hz_win10s_stride2s.yaml \
+  configs/binary_bissm_d64_n2_s32_100hz_win4s_stride2s.yaml \
+  configs/binary_bissm_d64_n2_s32_100hz_win6s_stride2s.yaml \
+  configs/binary_bissm_d64_n2_s32_100hz_win8s_stride2s.yaml \
+  configs/binary_bissm_d64_n2_s32_100hz_win10s_stride2s.yaml \
   configs/binary_ecgmamba_100hz_win4s_stride2s.yaml \
   configs/binary_ecgmamba_100hz_win6s_stride2s.yaml \
   configs/binary_ecgmamba_100hz_win8s_stride2s.yaml \
   configs/binary_ecgmamba_100hz_win10s_stride2s.yaml \
-  configs/binary_bissm_reduced4_100hz_win10s_stride2s.yaml
-```
-
-## Makefile shortcuts
-
-```bash
-make train CONFIG=configs/binary_ecgmamba_100hz.yaml
-make eval CONFIG=configs/binary_ecgmamba_100hz.yaml CKPT=runs/<run_name>/checkpoints/best.ckpt
-make splits CONFIG=configs/binary_ecgmamba_100hz.yaml
-make test
+  configs/binary_bissm_d64_n4_s64_100hz_win10s_stride2s.yaml
 ```
 
 ## Preprocessing
