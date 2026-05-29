@@ -6,6 +6,7 @@ import torch
 from data.parquet_dataset import ParquetECGDataset
 from evaluate.efficiency import efficiency_metadata_from_config
 from models import build_model
+from models.cnn_baseline import CNNBaseline
 from models.lstm_baseline import BiLSTMBaseline
 from utils.config import load_config
 
@@ -117,6 +118,36 @@ def test_bilstm_dataloader_model_smoke_per_config():
     for sec in [4, 6, 8, 10]:
         cfg = load_config(f"configs/binary_bilstm_100hz_win{sec}s_stride2s.yaml")
         model = build_model(cfg)
+        x = torch.randn(2, 1, int(sec * 100))
+        logits, features = model(x)
+        assert logits.shape == (2,)
+        assert features.shape == (2, 256)
+
+
+def test_cnn1d_configs_load_and_match_protocol():
+    for sec in [4, 6, 8, 10]:
+        cfg = load_config(f"configs/binary_cnn1d_100hz_win{sec}s_stride2s.yaml")
+        assert cfg["model"]["name"] == "cnn1d"
+        assert cfg["model"]["in_channels"] == 1
+        assert cfg["model"]["cnn_channels"] == [64, 128, 256]
+        assert cfg["model"]["cnn_kernel_size"] == 7
+        assert cfg["model"]["cnn_stride"] == 2
+        assert cfg["model"]["cnn_dropout"] == 0.1
+        assert cfg["model"]["cnn_batchnorm"] is True
+        assert cfg["preprocessing"]["fs_target"] == 100
+        assert cfg["preprocessing"]["target_seconds"] == float(sec)
+        assert cfg["preprocessing"]["windowing"]["window_seconds"] == float(sec)
+        assert cfg["preprocessing"]["windowing"]["stride_seconds"] == 2.0
+        assert cfg["preprocessing"]["windowing"]["pad_remainder"] is False
+        assert cfg["split"]["train_ratio"] == 0.7
+        assert cfg["split"]["val_ratio"] == 0.1
+
+
+def test_cnn1d_dataloader_model_smoke_per_config():
+    for sec in [4, 6, 8, 10]:
+        cfg = load_config(f"configs/binary_cnn1d_100hz_win{sec}s_stride2s.yaml")
+        model = build_model(cfg)
+        assert isinstance(model, CNNBaseline)
         x = torch.randn(2, 1, int(sec * 100))
         logits, features = model(x)
         assert logits.shape == (2,)

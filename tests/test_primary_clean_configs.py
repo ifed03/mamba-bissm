@@ -19,6 +19,10 @@ def test_primary_clean_configs_window_shapes_and_stride():
         "configs/binary_bilstm_100hz_win6s_stride2s.yaml": 6.0,
         "configs/binary_bilstm_100hz_win8s_stride2s.yaml": 8.0,
         "configs/binary_bilstm_100hz_win10s_stride2s.yaml": 10.0,
+        "configs/binary_cnn1d_100hz_win4s_stride2s.yaml": 4.0,
+        "configs/binary_cnn1d_100hz_win6s_stride2s.yaml": 6.0,
+        "configs/binary_cnn1d_100hz_win8s_stride2s.yaml": 8.0,
+        "configs/binary_cnn1d_100hz_win10s_stride2s.yaml": 10.0,
         "configs/binary_bimamba_2layer_100hz_win4s_stride2s.yaml": 4.0,
         "configs/binary_bimamba_2layer_100hz_win6s_stride2s.yaml": 6.0,
         "configs/binary_bimamba_2layer_100hz_win8s_stride2s.yaml": 8.0,
@@ -87,3 +91,21 @@ def test_all_main_ecgmamba_bilstm_backbone_configs_are_bidirectional_and_half_wi
         assert model_cfg["lstm_bidirectional"] is True
         assert model_cfg["lstm_hidden_size"] == model_cfg["d_model"] // 2
         assert model_cfg["lstm_num_layers"] == model_cfg["n_layers"]
+
+
+def test_all_main_cnn1d_external_baseline_configs_match_protocol():
+    for sec in [4, 6, 8, 10]:
+        cfg = load_config(f"configs/binary_cnn1d_100hz_win{sec}s_stride2s.yaml")
+        model_cfg = cfg["model"]
+        assert model_cfg["name"] == "cnn1d"
+        assert model_cfg["in_channels"] == 1
+        assert model_cfg["cnn_channels"] == [64, 128, 256]
+        assert model_cfg["cnn_kernel_size"] == 7
+        assert model_cfg["cnn_stride"] == 2
+        assert model_cfg["cnn_dropout"] == 0.1
+        assert model_cfg["cnn_batchnorm"] is True
+        assert cfg["preprocessing"]["fs_target"] == 100
+        assert cfg["preprocessing"]["target_seconds"] == float(sec)
+        assert cfg["preprocessing"]["windowing"]["window_seconds"] == float(sec)
+        assert cfg["preprocessing"]["windowing"]["stride_seconds"] == 2.0
+        assert cfg["preprocessing"]["windowing"]["pad_remainder"] is False

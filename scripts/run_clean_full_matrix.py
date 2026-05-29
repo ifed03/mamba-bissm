@@ -38,7 +38,12 @@ def depth_sweep_configs() -> list[str]:
 
 def external_baseline_configs() -> list[str]:
     """Standalone baseline configs kept separate from backbone comparisons."""
-    return [f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml" for w in WINDOWS]
+    configs: list[str] = []
+    for w in WINDOWS:
+        configs.append(f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml")
+    for w in WINDOWS:
+        configs.append(f"configs/binary_cnn1d_100hz_win{w}s_stride2s.yaml")
+    return configs
 
 
 def clean_matrix_configs() -> list[str]:
