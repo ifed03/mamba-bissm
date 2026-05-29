@@ -12,19 +12,41 @@ from pathlib import Path
 WINDOWS = (4, 6, 8, 10)
 
 
-def clean_matrix_configs() -> list[str]:
+def controlled_ecgmamba_backbone_configs() -> list[str]:
+    """Configs for the controlled ECGMamba backbone comparison."""
     configs: list[str] = []
     for w in WINDOWS:
         configs.append(f"configs/binary_bissm_d64_n2_s64_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
-        configs.append(f"configs/binary_bissm_d64_n4_s64_100hz_win{w}s_stride2s.yaml")
-    for w in WINDOWS:
-        configs.append(f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml")
-    for w in WINDOWS:
         configs.append(f"configs/binary_mamba_d64_n2_s16_100hz_win{w}s_stride2s.yaml")
+    for w in WINDOWS:
+        configs.append(f"configs/binary_bimamba_2layer_100hz_win{w}s_stride2s.yaml")
+    for w in WINDOWS:
+        configs.append(f"configs/binary_ecgmamba_bilstm_d64_n2_100hz_win{w}s_stride2s.yaml")
+    return configs
+
+
+def depth_sweep_configs() -> list[str]:
+    """Additional depth-sweep configs, separate from the controlled comparison."""
+    configs: list[str] = []
+    for w in WINDOWS:
+        configs.append(f"configs/binary_bissm_d64_n4_s64_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
         configs.append(f"configs/binary_mamba_d64_n4_s16_100hz_win{w}s_stride2s.yaml")
     return configs
+
+
+def external_baseline_configs() -> list[str]:
+    """Standalone baseline configs kept separate from backbone comparisons."""
+    return [f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml" for w in WINDOWS]
+
+
+def clean_matrix_configs() -> list[str]:
+    return (
+        controlled_ecgmamba_backbone_configs()
+        + depth_sweep_configs()
+        + external_baseline_configs()
+    )
 
 
 def _default_batch_tag() -> str:
@@ -45,19 +67,36 @@ def main() -> None:
     )
     args = p.parse_args()
 
-    configs = clean_matrix_configs()
+    config_groups = [
+        ("controlled_ecgmamba_backbone", controlled_ecgmamba_backbone_configs()),
+        ("depth_sweep", depth_sweep_configs()),
+        ("external_baseline", external_baseline_configs()),
+    ]
+    configs = [cfg for _, group in config_groups for cfg in group]
     missing = [c for c in configs if not Path(c).exists()]
     if missing:
         raise FileNotFoundError(f"Missing config(s): {missing}")
 
     batch_tag = args.batch_tag or _default_batch_tag()
-    for idx, cfg in enumerate(configs, start=1):
-        stem = Path(cfg).stem
-        run_name = f"{stem}__{batch_tag}"
-        cmd = ["python", "scripts/train_model.py", "--config", cfg, "--run-name", run_name]
-        print(f"[{idx:02d}/{len(configs)}] {' '.join(cmd)}")
-        if not args.dry_run:
-            subprocess.run(cmd, check=True)
+    total = len(configs)
+    idx = 0
+    for group_name, group_configs in config_groups:
+        print(f"# {group_name}")
+        for cfg in group_configs:
+            idx += 1
+            stem = Path(cfg).stem
+            run_name = f"{stem}__{batch_tag}"
+            cmd = [
+                "python",
+                "scripts/train_model.py",
+                "--config",
+                cfg,
+                "--run-name",
+                run_name,
+            ]
+            print(f"[{idx:02d}/{total}] {' '.join(cmd)}")
+            if not args.dry_run:
+                subprocess.run(cmd, check=True)
 
 
 if __name__ == "__main__":

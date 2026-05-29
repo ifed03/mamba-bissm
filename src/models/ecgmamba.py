@@ -7,6 +7,46 @@ from .layers.pos_encoding import SinusoidalPositionalEncoding
 from .mamba_backbone import BiMambaBackbone, MambaBackbone
 
 
+class BiLSTMBackbone(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        hidden_size: int | None = None,
+        num_layers: int = 1,
+        dropout: float = 0.0,
+        bidirectional: bool = True,
+        layernorm: bool = True,
+    ):
+        super().__init__()
+        self.d_model = int(d_model)
+        self.hidden_size = (
+            int(hidden_size) if hidden_size is not None else max(1, self.d_model // 2)
+        )
+        self.num_layers = int(num_layers)
+        self.bidirectional = bool(bidirectional)
+
+        lstm_dropout = float(dropout) if self.num_layers > 1 else 0.0
+        self.lstm = nn.LSTM(
+            input_size=self.d_model,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers,
+            batch_first=True,
+            bidirectional=self.bidirectional,
+            dropout=lstm_dropout,
+        )
+        out_dim = self.hidden_size * (2 if self.bidirectional else 1)
+        self.proj = nn.Linear(out_dim, self.d_model)
+        self.dropout = nn.Dropout(float(dropout))
+        self.norm = nn.LayerNorm(self.d_model) if layernorm else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, D) -> (B, T, D)
+        y, _ = self.lstm(x)
+        y = self.proj(y)
+        y = self.dropout(y)
+        return self.norm(y)
+
+
 class ECGMamba(nn.Module):
     def __init__(self, cfg: dict):
         super().__init__()
@@ -28,9 +68,9 @@ class ECGMamba(nn.Module):
             self.backbone_name = model_name
         else:
             self.backbone_name = "bissm"
-        if self.backbone_name not in {"bissm", "mamba", "bimamba"}:
+        if self.backbone_name not in {"bissm", "mamba", "bimamba", "bilstm"}:
             raise ValueError(
-                f"Unsupported backbone '{self.backbone_name}'. Use one of: bissm, mamba, bimamba."
+                f"Unsupported backbone '{self.backbone_name}'. Use one of: bissm, mamba, bimamba, bilstm."
             )
 
         if self.backbone_name == "bissm":
@@ -49,6 +89,15 @@ class ECGMamba(nn.Module):
                     )
                     for _ in range(mcfg["n_layers"])
                 ]
+            )
+        elif self.backbone_name == "bilstm":
+            self.backbone = BiLSTMBackbone(
+                d_model=self.d_model,
+                hidden_size=mcfg.get("lstm_hidden_size"),
+                num_layers=mcfg.get("lstm_num_layers", mcfg.get("n_layers", 1)),
+                dropout=mcfg.get("lstm_dropout", mcfg.get("dropout", 0.0)),
+                bidirectional=mcfg.get("lstm_bidirectional", True),
+                layernorm=mcfg.get("lstm_layernorm", mcfg.get("use_layernorm", True)),
             )
         else:
             mamba_kwargs = {

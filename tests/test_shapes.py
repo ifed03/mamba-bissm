@@ -80,3 +80,58 @@ def test_ecgmamba_returns_raw_logits_not_probabilities():
     assert logits.shape == (2,)
     assert torch.all(logits > 1.0)
 
+
+def _small_ecgmamba_bilstm_cfg():
+    return {
+        "model": {
+            "name": "ecgmamba",
+            "backbone": "bilstm",
+            "d_model": 16,
+            "n_layers": 1,
+            "dropout": 0.0,
+            "lstm_hidden_size": 8,
+            "lstm_num_layers": 1,
+            "lstm_dropout": 0.2,
+            "lstm_bidirectional": True,
+            "lstm_layernorm": True,
+            "use_encoder": True,
+            "use_layernorm": True,
+        }
+    }
+
+
+def test_ecgmamba_bilstm_backbone_shapes_and_baseline_unchanged():
+    from models.lstm_baseline import BiLSTMBaseline
+
+    model = ECGMamba(_small_ecgmamba_bilstm_cfg())
+    model.eval()
+    x = torch.randn(2, 1, 400)
+
+    with torch.no_grad():
+        seq = model._to_sequence(x)
+        backbone_out = model.backbone(model.pos(seq))
+        logits, pooled = model(x)
+
+    assert seq.shape == (2, 100, model.d_model)
+    assert backbone_out.shape == (2, 100, model.d_model)
+    assert logits.shape == (2,)
+    assert pooled.shape == (2, model.d_model)
+    assert model.backbone.lstm.input_size == model.d_model
+    assert model.backbone.lstm.dropout == 0.0
+
+    baseline = BiLSTMBaseline(
+        {
+            "model": {
+                "name": "bilstm",
+                "hidden_size": 8,
+                "num_layers": 1,
+                "bidirectional": True,
+                "dropout": 0.0,
+                "pooling": "mean",
+            }
+        }
+    )
+    baseline_logits, baseline_features = baseline(x)
+    assert baseline.lstm.input_size == 1
+    assert baseline_logits.shape == (2,)
+    assert baseline_features.shape == (2, 16)
