@@ -29,7 +29,7 @@
 [26/32] python scripts/train_model.py --config configs/binary_bilstm_100hz_win6s_stride2s.yaml --run-name binary_bilstm_100hz_win6s_stride2s__preflight_20260529
 [27/32] python scripts/train_model.py --config configs/binary_bilstm_100hz_win8s_stride2s.yaml --run-name binary_bilstm_100hz_win8s_stride2s__preflight_20260529
 [28/32] python scripts/train_model.py --config configs/binary_bilstm_100hz_win10s_stride2s.yaml --run-name binary_bilstm_100hz_win10s_stride2s__preflight_20260529
-[29/32] python scripts/train_model.py --config configs/binary_cnn1d_100hz_win4s_stride2s.yaml --run-name binary_cnn1d_100hz_win4s_stride2s__preflight_20260529
-[30/32] python scripts/train_model.py --config configs/binary_cnn1d_100hz_win6s_stride2s.yaml --run-name binary_cnn1d_100hz_win6s_stride2s__preflight_20260529
-[31/32] python scripts/train_model.py --config configs/binary_cnn1d_100hz_win8s_stride2s.yaml --run-name binary_cnn1d_100hz_win8s_stride2s__preflight_20260529
-[32/32] python scripts/train_model.py --config configs/binary_cnn1d_100hz_win10s_stride2s.yaml --run-name binary_cnn1d_100hz_win10s_stride2s__preflight_20260529
+[29/32] python scripts/train_model.py --config configs/binary_cnn1d_c256_n3_k7_100hz_win4s_stride2s.yaml --run-name binary_cnn1d_c256_n3_k7_100hz_win4s_stride2s__preflight_20260529
+[30/32] python scripts/train_model.py --config configs/binary_cnn1d_c256_n3_k7_100hz_win6s_stride2s.yaml --run-name binary_cnn1d_c256_n3_k7_100hz_win6s_stride2s__preflight_20260529
+[31/32] python scripts/train_model.py --config configs/binary_cnn1d_c256_n3_k7_100hz_win8s_stride2s.yaml --run-name binary_cnn1d_c256_n3_k7_100hz_win8s_stride2s__preflight_20260529
+[32/32] python scripts/train_model.py --config configs/binary_cnn1d_c256_n3_k7_100hz_win10s_stride2s.yaml --run-name binary_cnn1d_c256_n3_k7_100hz_win10s_stride2s__preflight_20260529

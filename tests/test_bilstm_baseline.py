@@ -126,7 +126,7 @@ def test_bilstm_dataloader_model_smoke_per_config():
 
 def test_cnn1d_configs_load_and_match_protocol():
     for sec in [4, 6, 8, 10]:
-        cfg = load_config(f"configs/binary_cnn1d_100hz_win{sec}s_stride2s.yaml")
+        cfg = load_config(f"configs/binary_cnn1d_c256_n3_k7_100hz_win{sec}s_stride2s.yaml")
         assert cfg["model"]["name"] == "cnn1d"
         assert cfg["model"]["in_channels"] == 1
         assert cfg["model"]["cnn_channels"] == [64, 128, 256]
@@ -145,7 +145,7 @@ def test_cnn1d_configs_load_and_match_protocol():
 
 def test_cnn1d_dataloader_model_smoke_per_config():
     for sec in [4, 6, 8, 10]:
-        cfg = load_config(f"configs/binary_cnn1d_100hz_win{sec}s_stride2s.yaml")
+        cfg = load_config(f"configs/binary_cnn1d_c256_n3_k7_100hz_win{sec}s_stride2s.yaml")
         model = build_model(cfg)
         assert isinstance(model, CNNBaseline)
         x = torch.randn(2, 1, int(sec * 100))

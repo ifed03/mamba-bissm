@@ -19,10 +19,10 @@ def test_primary_clean_configs_window_shapes_and_stride():
         "configs/binary_bilstm_100hz_win6s_stride2s.yaml": 6.0,
         "configs/binary_bilstm_100hz_win8s_stride2s.yaml": 8.0,
         "configs/binary_bilstm_100hz_win10s_stride2s.yaml": 10.0,
-        "configs/binary_cnn1d_100hz_win4s_stride2s.yaml": 4.0,
-        "configs/binary_cnn1d_100hz_win6s_stride2s.yaml": 6.0,
-        "configs/binary_cnn1d_100hz_win8s_stride2s.yaml": 8.0,
-        "configs/binary_cnn1d_100hz_win10s_stride2s.yaml": 10.0,
+        "configs/binary_cnn1d_c256_n3_k7_100hz_win4s_stride2s.yaml": 4.0,
+        "configs/binary_cnn1d_c256_n3_k7_100hz_win6s_stride2s.yaml": 6.0,
+        "configs/binary_cnn1d_c256_n3_k7_100hz_win8s_stride2s.yaml": 8.0,
+        "configs/binary_cnn1d_c256_n3_k7_100hz_win10s_stride2s.yaml": 10.0,
         "configs/binary_bimamba_2layer_100hz_win4s_stride2s.yaml": 4.0,
         "configs/binary_bimamba_2layer_100hz_win6s_stride2s.yaml": 6.0,
         "configs/binary_bimamba_2layer_100hz_win8s_stride2s.yaml": 8.0,
@@ -95,7 +95,7 @@ def test_all_main_ecgmamba_bilstm_backbone_configs_are_bidirectional_and_half_wi
 
 def test_all_main_cnn1d_external_baseline_configs_match_protocol():
     for sec in [4, 6, 8, 10]:
-        cfg = load_config(f"configs/binary_cnn1d_100hz_win{sec}s_stride2s.yaml")
+        cfg = load_config(f"configs/binary_cnn1d_c256_n3_k7_100hz_win{sec}s_stride2s.yaml")
         model_cfg = cfg["model"]
         assert model_cfg["name"] == "cnn1d"
         assert model_cfg["in_channels"] == 1

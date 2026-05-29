@@ -42,7 +42,7 @@ def external_baseline_configs() -> list[str]:
     for w in WINDOWS:
         configs.append(f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml")
     for w in WINDOWS:
-        configs.append(f"configs/binary_cnn1d_100hz_win{w}s_stride2s.yaml")
+        configs.append(f"configs/binary_cnn1d_c256_n3_k7_100hz_win{w}s_stride2s.yaml")
     return configs
 
 

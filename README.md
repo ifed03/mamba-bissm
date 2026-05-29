@@ -73,7 +73,7 @@ python scripts/train_model.py --config configs/binary_ecgmamba_100hz.yaml --run-
 Without `--run-name`, the pipeline creates a richer run name from config fields, e.g.:
 
 ```text
-runs/ecgmamba_fs100_win10p0_seed42__20260224_165428/
+runs/bissm_d64_n2_s64_mil_fs100_win10p0_seed42__20260224_165428/
 ```
 
 ## Evaluate
@@ -96,8 +96,8 @@ listing under `audits/`:
 python scripts/audit_clean_full_matrix.py --batch-tag preflight_YYYYMMDD
 ```
 
-Run the full clean-data 28-run AF/NSR matrix (controlled ECGMamba backbones,
-depth sweeps, and standalone BiLSTM baselines across 4/6/8/10s):
+Run the full clean-data 32-run AF/NSR matrix (controlled ECGMamba backbones,
+depth sweeps, and standalone BiLSTM/CNN1D external baselines across 4/6/8/10s):
 
 ```bash
 python scripts/run_clean_full_matrix.py

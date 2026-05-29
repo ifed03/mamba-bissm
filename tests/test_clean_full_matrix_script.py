@@ -37,6 +37,6 @@ def test_clean_matrix_keeps_controlled_backbones_separate_from_external_baseline
     assert all("d64_n4" in cfg for cfg in depth_sweep)
     assert all("binary_cnn1d_" not in cfg for cfg in controlled)
     assert all("binary_cnn1d_" not in cfg for cfg in depth_sweep)
-    assert {f"configs/binary_cnn1d_100hz_win{w}s_stride2s.yaml" for w in (4, 6, 8, 10)} <= set(external)
+    assert {f"configs/binary_cnn1d_c256_n3_k7_100hz_win{w}s_stride2s.yaml" for w in (4, 6, 8, 10)} <= set(external)
     assert sum("binary_bilstm_" in cfg for cfg in external) == 4
     assert sum("binary_cnn1d_" in cfg for cfg in external) == 4

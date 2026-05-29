@@ -2,7 +2,7 @@
 
 This preflight compares the new standalone CNN1D external baseline against the existing standalone BiLSTM baseline and the controlled ECGMamba backbone variants before full training runs.
 
-The main CNN1D configs were widened from `[32, 64, 128]` to `[64, 128, 256]` after the first pass because the narrower version had only 72,705 trainable parameters. The widened version remains simple, but is closer to the existing baselines for interpretation.
+The main CNN1D configs use the canonical label `binary_cnn1d_c256_n3_k7_100hz_winXs_stride2s`. They were widened from `[32, 64, 128]` to `[64, 128, 256]` after the first pass because the narrower version had only 72,705 trainable parameters. The widened version remains simple, but is closer to the existing baselines for interpretation.
 
 ## Parameter counts
 
