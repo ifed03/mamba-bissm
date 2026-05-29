@@ -49,12 +49,20 @@ def standalone_bilstm_configs() -> list[str]:
     return [f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml" for w in WINDOWS]
 
 
+def standalone_cnn1d_configs() -> list[str]:
+    return [
+        f"configs/binary_cnn1d_c256_n3_k7_100hz_win{w}s_stride2s.yaml"
+        for w in WINDOWS
+    ]
+
+
 def clean_backbone_finish_configs() -> list[str]:
     return (
         mamba_backbone_configs()
         + bimamba_backbone_configs()
         + ecgmamba_bilstm_backbone_configs()
         + standalone_bilstm_configs()
+        + standalone_cnn1d_configs()
     )
 
 
@@ -164,6 +172,7 @@ def main() -> None:
         ("ecgmamba_bimamba_backbone", bimamba_backbone_configs()),
         ("ecgmamba_bilstm_backbone", ecgmamba_bilstm_backbone_configs()),
         ("standalone_bilstm_baseline", standalone_bilstm_configs()),
+        ("standalone_cnn1d_baseline", standalone_cnn1d_configs()),
     ]
     configs = [cfg for _, group in config_groups for cfg in group]
     missing = [c for c in configs if not Path(c).exists()]
