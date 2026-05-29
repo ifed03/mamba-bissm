@@ -3,6 +3,30 @@ import torch
 import pytest
 
 
+def test_mamba_backbone_sanitizes_nonfinite_layer_outputs(monkeypatch):
+    from models import mamba_backbone
+
+    class NonfiniteMamba(torch.nn.Module):
+        def __init__(self, **kwargs):
+            super().__init__()
+
+        def forward(self, x):
+            y = torch.zeros_like(x)
+            y[0, 0, 0] = float("nan")
+            y[0, 0, 1] = float("inf")
+            y[0, 0, 2] = float("-inf")
+            return y
+
+    monkeypatch.setattr(mamba_backbone, "Mamba", NonfiniteMamba)
+    model = mamba_backbone.MambaBackbone(d_model=4, n_layers=1, norm="none")
+    x = torch.randn(2, 3, 4)
+
+    out = model(x)
+
+    assert out.shape == x.shape
+    assert torch.isfinite(out).all()
+
+
 def test_mamba_backbone_shape_and_backward():
     pytest.importorskip("mamba_ssm")
     from models.mamba_backbone import MambaBackbone

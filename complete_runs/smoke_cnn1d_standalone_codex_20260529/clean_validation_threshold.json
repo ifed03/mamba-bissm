@@ -1,0 +1,6 @@
+{
+  "threshold": 0.720005214214325,
+  "threshold_source": "clean_val",
+  "checkpoint_source": "clean_val",
+  "checkpoint": "runs/smoke_cnn1d_standalone_codex_20260529/checkpoints/best.ckpt"
+}

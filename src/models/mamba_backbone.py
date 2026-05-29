@@ -28,6 +28,12 @@ def _make_mamba_layer(d_model: int, d_state: int, d_conv: int, expand: int, use_
     return Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand, use_fast_path=use_fast_path)
 
 
+def _finite_activation(x: torch.Tensor) -> torch.Tensor:
+    if torch.isfinite(x).all():
+        return x
+    return torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+
+
 class MambaBackbone(nn.Module):
     def __init__(
         self,
@@ -59,8 +65,9 @@ class MambaBackbone(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, T, D)
         for block in self.layers:
-            x = x + self.dropout(block(x))
-        return self.norm(x)
+            y = _finite_activation(block(x))
+            x = _finite_activation(x + self.dropout(y))
+        return _finite_activation(self.norm(x))
 
 
 class BiMambaBackbone(nn.Module):
@@ -106,5 +113,5 @@ class BiMambaBackbone(nn.Module):
         y_b = self.bwd(x_rev)
         y_b = torch.flip(y_b, dims=[1])
         y = torch.cat([y_f, y_b], dim=-1)
-        y = self.fuse(y)
-        return self.norm(y)
+        y = _finite_activation(self.fuse(y))
+        return _finite_activation(self.norm(y))

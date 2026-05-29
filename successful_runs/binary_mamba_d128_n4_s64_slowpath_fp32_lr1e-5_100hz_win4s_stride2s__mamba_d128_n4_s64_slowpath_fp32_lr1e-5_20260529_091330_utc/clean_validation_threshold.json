@@ -1,0 +1,6 @@
+{
+  "threshold": 0.9863473176956177,
+  "threshold_source": "clean_val",
+  "checkpoint_source": "clean_val",
+  "checkpoint": "runs/binary_mamba_d128_n4_s64_slowpath_fp32_lr1e-5_100hz_win4s_stride2s__mamba_d128_n4_s64_slowpath_fp32_lr1e-5_20260529_091330_utc/checkpoints/best.ckpt"
+}

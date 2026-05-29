@@ -6,17 +6,32 @@ import torch
 
 
 def infer_model_dims(state_dict: dict) -> tuple[int, int]:
-    backbone_idxs = sorted({int(key.split(".")[1]) for key in state_dict if key.startswith("backbone.")})
+    backbone_idxs: set[int] = set()
+    for key in state_dict:
+        if not key.startswith("backbone."):
+            continue
+        parts = key.split(".")
+        if len(parts) > 1 and parts[1].isdigit():
+            backbone_idxs.add(int(parts[1]))
+        elif len(parts) > 2 and parts[1] == "layers" and parts[2].isdigit():
+            backbone_idxs.add(int(parts[2]))
+        elif len(parts) > 3 and parts[1] in {"fwd", "bwd"} and parts[2] == "layers" and parts[3].isdigit():
+            backbone_idxs.add(int(parts[3]))
     if not backbone_idxs:
-        raise ValueError("Cannot infer model size: checkpoint state_dict has no backbone.* keys.")
+        raise ValueError("Cannot infer model size: checkpoint state_dict has no backbone layer keys.")
     if "pos.pe" not in state_dict:
         raise ValueError("Cannot infer model size: checkpoint state_dict is missing pos.pe.")
     return int(state_dict["pos.pe"].shape[-1]), len(backbone_idxs)
 
 
 def validate_config_matches_state_dict(cfg: dict, state_dict: dict, *, checkpoint: str | Path | None = None) -> None:
-    ckpt_d_model, ckpt_n_layers = infer_model_dims(state_dict)
     model_cfg = cfg.get("model") or {}
+    model_name = str(model_cfg.get("name", "ecgmamba")).lower()
+    backbone = str(model_cfg.get("backbone", "bissm" if model_name == "ecgmamba" else model_name)).lower()
+    if model_name not in {"ecgmamba", "mamba", "bimamba"} or backbone not in {"bissm", "mamba", "bimamba"}:
+        return
+
+    ckpt_d_model, ckpt_n_layers = infer_model_dims(state_dict)
     cfg_d_model = int(model_cfg["d_model"])
     cfg_n_layers = int(model_cfg["n_layers"])
     if cfg_d_model == ckpt_d_model and cfg_n_layers == ckpt_n_layers:

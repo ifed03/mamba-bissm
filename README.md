@@ -82,6 +82,41 @@ runs/bissm_d64_n2_s64_mil_fs100_win10p0_seed42__20260224_165428/
 python scripts/evaluate_model.py --config configs/binary_ecgmamba_100hz.yaml --ckpt runs/<run_name>/checkpoints/best.ckpt
 ```
 
+## Zero-shot noise robustness sweep
+
+The zero-shot noisy-test protocol reuses clean trained checkpoints and applies
+NSTDB noise only to the test split. Thresholds remain sourced from clean
+validation (`clean_val`); noisy test data is never used to tune thresholds.
+Supported raw NSTDB noise labels are `bw`, `em`, and `ma`.
+
+Dry-run every successful model and print the full evaluation matrix:
+
+```bash
+python scripts/sweep_zero_shot_noise.py --successful-runs successful_runs --dry-run
+```
+
+Run the full robustness sweep at 18, 6, 0, and -6 dB:
+
+```bash
+python scripts/sweep_zero_shot_noise.py \
+  --successful-runs successful_runs \
+  --noise-types bw em ma \
+  --snrs 18 6 0 -6
+```
+
+By default, per-condition JSON files are written under:
+
+```text
+outputs/zero_shot_noise_sweep/<model_family>/<source_run_name>/zero-shot/
+```
+
+Consolidated summaries are written to:
+
+```text
+outputs/zero_shot_noise_sweep/zero_shot_noise_summary.csv
+outputs/zero_shot_noise_sweep/zero_shot_noise_summary.json
+```
+
 ## Sweep (baseline + ECGMamba + ablations via config toggles)
 
 ```bash

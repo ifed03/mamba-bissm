@@ -1,0 +1,6 @@
+{
+  "threshold": 0.3621963560581207,
+  "threshold_source": "clean_val",
+  "checkpoint_source": "clean_val",
+  "checkpoint": "runs/binary_bilstm_100hz_win6s_stride2s__clean_backbone_finish_no_mamba_20260529_075758_utc/checkpoints/best.ckpt"
+}

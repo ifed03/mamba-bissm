@@ -42,6 +42,19 @@ def _dry_metrics_filename(noise_type: str, snr_db: float) -> str:
     return f"metrics_zero-shot_{_dry_condition_key(noise_type, snr_db)}.json"
 
 
+def _result_json_complete(path: str | Path) -> bool:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    required_top = {"eval", "noise_type", "snr_db", "threshold", "threshold_source", "checkpoint", "num_test_examples", "test"}
+    if not required_top.issubset(payload):
+        return False
+    metrics = payload.get("test") or {}
+    required_metrics = {"auroc", "auprc", "f1", "accuracy", "sensitivity", "specificity", "confusion_matrix"}
+    return isinstance(metrics, dict) and required_metrics.issubset(metrics)
+
+
 def _write_predictions(run_dir: Path, val_records, test_records, val_segments, test_segments) -> None:
     pd.DataFrame(
         {"record_id": val_records["record_id"], "y_true": val_records["y_true"].astype(int), "y_prob": val_records["y_prob"], "split": "val"}
@@ -120,6 +133,7 @@ def _parse_args():
     p.add_argument("--clean-threshold-path", default=None)
     p.add_argument("--output-root", default=None)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--skip-existing", action="store_true")
     return p.parse_args()
 
 
@@ -203,6 +217,12 @@ def main():
         for noise_type in args.noise_types:
             for snr_db in args.snr_db:
                 condition = NoiseCondition(noise_type, snr_db)
+                metric_path = output_root / metrics_filename(condition)
+                if args.skip_existing and _result_json_complete(metric_path):
+                    payload = json.loads(metric_path.read_text(encoding="utf-8"))
+                    print(f"SKIP existing zero-shot noise: noise_type={noise_type}, snr_db={snr_db:g}")
+                    summary_rows.append({"noise_type": noise_type, "snr_db": float(snr_db), "metrics": payload.get("test", {})})
+                    continue
                 print(f"Evaluating zero-shot noise: noise_type={noise_type}, snr_db={snr_db:g}")
                 _, _, noisy_test_loader = make_dataloaders(
                     cfg,
@@ -219,7 +239,6 @@ def main():
                 test_count = len(noisy_test_loader.dataset.record_ids)
                 print(f"Test examples processed: {test_count}")
                 metrics, test_records, test_segments, _ = evaluate_record_level(model, noisy_test_loader, device, threshold=threshold)
-                metric_path = output_root / metrics_filename(condition)
                 payload = {
                     "eval": "zero-shot",
                     "condition": condition_key(condition),

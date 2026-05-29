@@ -1,0 +1,67 @@
+{
+  "best_epoch": 5,
+  "best_val_metric_name": "auroc",
+  "best_val_metric": 1.0,
+  "best_val_auroc": 1.0,
+  "threshold": 0.029212236404418945,
+  "val": {
+    "auroc": 1.0,
+    "auprc": 0.9999999999999998,
+    "f1": 1.0,
+    "accuracy": 1.0,
+    "acc": 1.0,
+    "sensitivity": 1.0,
+    "specificity": 1.0,
+    "confusion_matrix": [
+      [
+        99,
+        0
+      ],
+      [
+        0,
+        115
+      ]
+    ],
+    "cm": [
+      [
+        99,
+        0
+      ],
+      [
+        0,
+        115
+      ]
+    ]
+  },
+  "test": {
+    "auroc": 0.994002866277147,
+    "auprc": 0.9936128637116063,
+    "f1": 0.9808917197452229,
+    "accuracy": 0.9789719626168224,
+    "acc": 0.9789719626168224,
+    "sensitivity": 0.9829787234042553,
+    "specificity": 0.9740932642487047,
+    "confusion_matrix": [
+      [
+        188,
+        5
+      ],
+      [
+        4,
+        231
+      ]
+    ],
+    "cm": [
+      [
+        188,
+        5
+      ],
+      [
+        4,
+        231
+      ]
+    ]
+  },
+  "training_time_seconds": 45.141653060913086,
+  "mean_epoch_time_seconds": 2.8213456423254684
+}

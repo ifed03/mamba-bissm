@@ -1,0 +1,6 @@
+{
+  "threshold": 0.9856356382369995,
+  "threshold_source": "clean_val",
+  "checkpoint_source": "clean_val",
+  "checkpoint": "runs/smoke_ecgmamba_bilstm_backbone_codex_20260529/checkpoints/best.ckpt"
+}

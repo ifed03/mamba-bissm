@@ -15,6 +15,7 @@ runs/
 data/raw/
 data/interim/
 data/processed/
+outputs/zero_shot_noise_sweep/
 
 # Distribution / packaging
 .Python
