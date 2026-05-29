@@ -1,0 +1,31 @@
+# controlled_ecgmamba_backbone
+[01/28] python scripts/train_model.py --config configs/binary_bissm_d64_n2_s64_100hz_win4s_stride2s.yaml --run-name binary_bissm_d64_n2_s64_100hz_win4s_stride2s__preflight_20260529
+[02/28] python scripts/train_model.py --config configs/binary_bissm_d64_n2_s64_100hz_win6s_stride2s.yaml --run-name binary_bissm_d64_n2_s64_100hz_win6s_stride2s__preflight_20260529
+[03/28] python scripts/train_model.py --config configs/binary_bissm_d64_n2_s64_100hz_win8s_stride2s.yaml --run-name binary_bissm_d64_n2_s64_100hz_win8s_stride2s__preflight_20260529
+[04/28] python scripts/train_model.py --config configs/binary_bissm_d64_n2_s64_100hz_win10s_stride2s.yaml --run-name binary_bissm_d64_n2_s64_100hz_win10s_stride2s__preflight_20260529
+[05/28] python scripts/train_model.py --config configs/binary_mamba_d64_n2_s16_100hz_win4s_stride2s.yaml --run-name binary_mamba_d64_n2_s16_100hz_win4s_stride2s__preflight_20260529
+[06/28] python scripts/train_model.py --config configs/binary_mamba_d64_n2_s16_100hz_win6s_stride2s.yaml --run-name binary_mamba_d64_n2_s16_100hz_win6s_stride2s__preflight_20260529
+[07/28] python scripts/train_model.py --config configs/binary_mamba_d64_n2_s16_100hz_win8s_stride2s.yaml --run-name binary_mamba_d64_n2_s16_100hz_win8s_stride2s__preflight_20260529
+[08/28] python scripts/train_model.py --config configs/binary_mamba_d64_n2_s16_100hz_win10s_stride2s.yaml --run-name binary_mamba_d64_n2_s16_100hz_win10s_stride2s__preflight_20260529
+[09/28] python scripts/train_model.py --config configs/binary_bimamba_2layer_100hz_win4s_stride2s.yaml --run-name binary_bimamba_2layer_100hz_win4s_stride2s__preflight_20260529
+[10/28] python scripts/train_model.py --config configs/binary_bimamba_2layer_100hz_win6s_stride2s.yaml --run-name binary_bimamba_2layer_100hz_win6s_stride2s__preflight_20260529
+[11/28] python scripts/train_model.py --config configs/binary_bimamba_2layer_100hz_win8s_stride2s.yaml --run-name binary_bimamba_2layer_100hz_win8s_stride2s__preflight_20260529
+[12/28] python scripts/train_model.py --config configs/binary_bimamba_2layer_100hz_win10s_stride2s.yaml --run-name binary_bimamba_2layer_100hz_win10s_stride2s__preflight_20260529
+[13/28] python scripts/train_model.py --config configs/binary_ecgmamba_bilstm_d64_n2_100hz_win4s_stride2s.yaml --run-name binary_ecgmamba_bilstm_d64_n2_100hz_win4s_stride2s__preflight_20260529
+[14/28] python scripts/train_model.py --config configs/binary_ecgmamba_bilstm_d64_n2_100hz_win6s_stride2s.yaml --run-name binary_ecgmamba_bilstm_d64_n2_100hz_win6s_stride2s__preflight_20260529
+[15/28] python scripts/train_model.py --config configs/binary_ecgmamba_bilstm_d64_n2_100hz_win8s_stride2s.yaml --run-name binary_ecgmamba_bilstm_d64_n2_100hz_win8s_stride2s__preflight_20260529
+[16/28] python scripts/train_model.py --config configs/binary_ecgmamba_bilstm_d64_n2_100hz_win10s_stride2s.yaml --run-name binary_ecgmamba_bilstm_d64_n2_100hz_win10s_stride2s__preflight_20260529
+# depth_sweep
+[17/28] python scripts/train_model.py --config configs/binary_bissm_d64_n4_s64_100hz_win4s_stride2s.yaml --run-name binary_bissm_d64_n4_s64_100hz_win4s_stride2s__preflight_20260529
+[18/28] python scripts/train_model.py --config configs/binary_bissm_d64_n4_s64_100hz_win6s_stride2s.yaml --run-name binary_bissm_d64_n4_s64_100hz_win6s_stride2s__preflight_20260529
+[19/28] python scripts/train_model.py --config configs/binary_bissm_d64_n4_s64_100hz_win8s_stride2s.yaml --run-name binary_bissm_d64_n4_s64_100hz_win8s_stride2s__preflight_20260529
+[20/28] python scripts/train_model.py --config configs/binary_bissm_d64_n4_s64_100hz_win10s_stride2s.yaml --run-name binary_bissm_d64_n4_s64_100hz_win10s_stride2s__preflight_20260529
+[21/28] python scripts/train_model.py --config configs/binary_mamba_d64_n4_s16_100hz_win4s_stride2s.yaml --run-name binary_mamba_d64_n4_s16_100hz_win4s_stride2s__preflight_20260529
+[22/28] python scripts/train_model.py --config configs/binary_mamba_d64_n4_s16_100hz_win6s_stride2s.yaml --run-name binary_mamba_d64_n4_s16_100hz_win6s_stride2s__preflight_20260529
+[23/28] python scripts/train_model.py --config configs/binary_mamba_d64_n4_s16_100hz_win8s_stride2s.yaml --run-name binary_mamba_d64_n4_s16_100hz_win8s_stride2s__preflight_20260529
+[24/28] python scripts/train_model.py --config configs/binary_mamba_d64_n4_s16_100hz_win10s_stride2s.yaml --run-name binary_mamba_d64_n4_s16_100hz_win10s_stride2s__preflight_20260529
+# external_baseline
+[25/28] python scripts/train_model.py --config configs/binary_bilstm_100hz_win4s_stride2s.yaml --run-name binary_bilstm_100hz_win4s_stride2s__preflight_20260529
+[26/28] python scripts/train_model.py --config configs/binary_bilstm_100hz_win6s_stride2s.yaml --run-name binary_bilstm_100hz_win6s_stride2s__preflight_20260529
+[27/28] python scripts/train_model.py --config configs/binary_bilstm_100hz_win8s_stride2s.yaml --run-name binary_bilstm_100hz_win8s_stride2s__preflight_20260529
+[28/28] python scripts/train_model.py --config configs/binary_bilstm_100hz_win10s_stride2s.yaml --run-name binary_bilstm_100hz_win10s_stride2s__preflight_20260529

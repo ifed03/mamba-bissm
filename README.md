@@ -88,7 +88,16 @@ python scripts/evaluate_model.py --config configs/binary_ecgmamba_100hz.yaml --c
 python scripts/sweep.py --configs configs/binary_cnn_baseline_100hz.yaml configs/binary_ecgmamba_100hz.yaml configs/binary_ecgmamba_500hz.yaml
 ```
 
-Run the full clean-data 20-run AF/NSR matrix (BiSSM d64_n2/d64_n4, BiLSTM, Mamba d64_n2/d64_n4 across 4/6/8/10s):
+Run the clean full-matrix preflight audit first. It checks controlled ECGMamba
+parameter counts, intermediate tensor shapes, and saves the dry-run command
+listing under `audits/`:
+
+```bash
+python scripts/audit_clean_full_matrix.py --batch-tag preflight_YYYYMMDD
+```
+
+Run the full clean-data 28-run AF/NSR matrix (controlled ECGMamba backbones,
+depth sweeps, and standalone BiLSTM baselines across 4/6/8/10s):
 
 ```bash
 python scripts/run_clean_full_matrix.py
