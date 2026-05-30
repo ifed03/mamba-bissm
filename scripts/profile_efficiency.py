@@ -26,6 +26,7 @@ if __name__ == "__main__":
     p.add_argument("--throughput-batch-size", type=int, default=16)
     p.add_argument("--max-records", type=int, default=None)
     p.add_argument("--output-dir", default=None)
+    p.add_argument("--window-seconds", type=float, default=None)
     args = p.parse_args()
 
     from data.datamodule import make_dataloaders
@@ -44,6 +45,12 @@ if __name__ == "__main__":
     from utils.config import load_config
 
     cfg = load_config(args.config)
+    if args.window_seconds is not None:
+        preprocessing = cfg.setdefault("preprocessing", {})
+        preprocessing["target_seconds"] = float(args.window_seconds)
+        windowing = preprocessing.setdefault("windowing", {})
+        windowing["enabled"] = True
+        windowing["window_seconds"] = float(args.window_seconds)
     device = torch.device(args.device)
     fast_path_overridden_for_cpu = False
     if device.type == "cpu":

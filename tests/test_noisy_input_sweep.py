@@ -536,3 +536,154 @@ def test_shared_efficiency_profiles_reused_under_resume_when_present(tmp_path):
     items_after_one_shared_exists = sweep.build_work_items(manifest, profile_efficiency=True)
     assert len([item for item in items_after_one_shared_exists if item.kind == "profile_efficiency"]) == 5
     assert representative_items[0].entry["run_name"] not in {item.entry["run_name"] for item in items_after_one_shared_exists}
+
+
+
+def test_default_efficiency_window_uses_resolved_config_only(tmp_path):
+    manifest = _manifest(tmp_path)
+    _complete_manifest(manifest)
+    items = sweep.build_work_items(manifest, profile_efficiency=True)
+    assert len(items) == 6
+    assert all(item.entry.get("efficiency_window_seconds_override") is None for item in items)
+    assert {item.entry["input_length_samples"] for item in items} == {400}
+
+
+def test_efficiency_window_seconds_creates_profile_per_model_and_window(tmp_path):
+    manifest = _manifest(tmp_path)
+    _complete_manifest(manifest)
+    items = sweep.build_work_items(
+        manifest,
+        profile_efficiency=True,
+        efficiency_window_seconds=[4.0, 6.0, 8.0, 10.0],
+    )
+    assert len(items) == 24
+    assert len({item.entry["efficiency_profile_key"] for item in items}) == 24
+    assert {item.entry["efficiency_window_seconds_override"] for item in items} == {4.0, 6.0, 8.0, 10.0}
+    assert {item.entry["efficiency_input_length_samples"] for item in items} == {400, 600, 800, 1000}
+
+
+def test_context_profile_keys_differ_by_input_length(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    _complete_manifest(manifest)
+    entries = sweep.build_efficiency_context_profile_entries(manifest, tmp_path / "runs", [4.0, 6.0])
+    keys = {entry["efficiency_profile_key"] for entry in entries}
+    assert len(keys) == 2
+    assert any("input-400" in key and "win-4s" in key for key in keys)
+    assert any("input-600" in key and "win-6s" in key for key in keys)
+
+
+def test_existing_context_profile_is_not_overwritten_without_overwrite(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    _complete_manifest(manifest)
+    entries = sweep.build_efficiency_context_profile_entries(manifest, tmp_path / "runs", [4.0])
+    _write_shared_efficiency(entries[0])
+    items = sweep.build_work_items(manifest, profile_efficiency=True, efficiency_window_seconds=[4.0])
+    assert items == []
+    overwrite_items = sweep.build_work_items(
+        manifest,
+        profile_efficiency=True,
+        overwrite_efficiency=True,
+        efficiency_window_seconds=[4.0],
+    )
+    assert len(overwrite_items) == 1
+
+
+def test_context_length_summary_has_one_row_per_model_config_window(tmp_path):
+    manifest = _manifest(tmp_path)
+    _complete_manifest(manifest)
+    entries = sweep.build_efficiency_context_profile_entries(manifest, tmp_path / "runs", [4.0, 6.0])
+    for entry in entries:
+        _write_shared_efficiency(entry, trainable=222, record_latency_ms=7.5)
+    rows = sweep.collect_efficiency_context_length_summary(manifest, tmp_path / "runs", [4.0, 6.0])
+    assert len(rows) == 12
+    assert {row["status"] for row in rows} == {"success"}
+    assert {row["num_trainable_params"] for row in rows} == {222}
+    assert {row["input_length_samples"] for row in rows} == {400, 600}
+
+
+def test_context_length_summary_records_failed_profile_without_stopping_others(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba", "bilstm"], noise_types=["bw"], snr_db=[18.0])
+    _complete_manifest(manifest)
+    entries = sweep.build_efficiency_context_profile_entries(manifest, tmp_path / "runs", [6.0])
+    entries[0]["status"] = "failed"
+    entries[0]["return_code"] = 9
+    entries[0]["error_message"] = "incompatible input length"
+    _write_shared_efficiency(entries[1], trainable=333, record_latency_ms=8.5)
+    rows = sweep.collect_efficiency_context_length_summary(manifest, tmp_path / "runs", [6.0])
+    statuses = {row["source_run_name"]: row["status"] for row in rows}
+    assert set(statuses.values()) == {"failed", "success"}
+    failed = next(row for row in rows if row["status"] == "failed")
+    assert failed["error_message"] == "incompatible input length"
+
+
+def test_context_representative_selection_prefers_bw_18db(tmp_path):
+    manifest = _manifest(
+        tmp_path,
+        models=["ecgmamba_mamba"],
+        noise_types=["em", "bw"],
+        snr_db=[24.0, 18.0],
+    )
+    _complete_manifest(manifest)
+    entries = sweep.build_efficiency_context_profile_entries(manifest, tmp_path / "runs", [6.0])
+    assert len(entries) == 1
+    assert entries[0]["efficiency_profile_source_run_name"].endswith("bw_18dB")
+
+
+def test_context_length_profiles_do_not_explode_per_condition(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw", "em", "ma"], snr_db=[24.0, 18.0, 12.0])
+    _complete_manifest(manifest)
+    items = sweep.build_work_items(manifest, profile_efficiency=True, efficiency_window_seconds=[4.0, 6.0, 8.0])
+    assert len(manifest["entries"]) == 9
+    assert len(items) == 3
+
+
+
+def test_context_length_enriched_work_item_does_not_require_manifest_dict_equality(tmp_path, monkeypatch):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    _complete_manifest(manifest)
+    seen = []
+
+    def fake_run(item, **kwargs):
+        assert item.entry not in manifest["entries"]
+        seen.append((item.entry["run_name"], item.entry["efficiency_profile_key"]))
+        return sweep.WorkResult(item.entry["run_name"], item.kind, "profiled", 0, "context.log")
+
+    monkeypatch.setattr(sweep, "_run_work_item", fake_run)
+    sweep.run_manifest(
+        manifest,
+        repo_root=REPO_ROOT,
+        jobs=1,
+        profile_efficiency=True,
+        efficiency_window_seconds=[6.0],
+    )
+    assert len(seen) == 1
+    context_entries = manifest["efficiency_context_profile_entries"]
+    assert context_entries[0]["status"] == "profiled"
+    assert context_entries[0]["log_file_path"] == "context.log"
+    assert manifest["entries"][0]["status"] == "completed"
+
+
+def test_parallel_context_length_tasks_same_source_different_windows_use_distinct_profile_locks(tmp_path, monkeypatch):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    _complete_manifest(manifest)
+    profiled = []
+
+    def fake_profile(entry, *, repo_root, warmup, repeats, throughput_batch_size, max_records, overwrite, log_file=None, output_dir=None, window_seconds=None):
+        assert output_dir is not None
+        assert window_seconds in {4.0, 6.0}
+        profiled.append((window_seconds, Path(output_dir)))
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        (Path(output_dir) / "efficiency.json").write_text(json.dumps({"trainable_parameters": 1}))
+
+    monkeypatch.setattr(sweep, "profile_entry_efficiency", fake_profile)
+    sweep.run_manifest(
+        manifest,
+        repo_root=REPO_ROOT,
+        jobs=2,
+        profile_efficiency=True,
+        efficiency_window_seconds=[4.0, 6.0],
+    )
+    assert {item[0] for item in profiled} == {4.0, 6.0}
+    assert len({item[1] for item in profiled}) == 2
+    assert all(not (path / sweep.LOCK_NAME).exists() for _, path in profiled)
+    assert [entry["status"] for entry in manifest["efficiency_context_profile_entries"]] == ["profiled", "profiled"]

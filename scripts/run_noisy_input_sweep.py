@@ -130,6 +130,35 @@ SUMMARY_FIELDS = (
 )
 
 
+CONTEXT_LENGTH_SUMMARY_FIELDS = (
+    "model_family",
+    "backbone",
+    "dimensions",
+    "efficiency_profile_key",
+    "source_run_name",
+    "source_checkpoint_path",
+    "window_seconds",
+    "input_length_samples",
+    "stride_seconds",
+    "num_trainable_params",
+    "mean_window_latency_ms_batch1",
+    "p50_window_latency_ms_batch1",
+    "p95_window_latency_ms_batch1",
+    "mean_record_latency_ms",
+    "windows_per_second_batch16",
+    "records_per_second",
+    "timing_device",
+    "timing_scope",
+    "warmup_iterations",
+    "measured_repeats",
+    "efficiency_file_path",
+    "log_file_path",
+    "return_code",
+    "error_message",
+    "status",
+)
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -518,12 +547,109 @@ def _is_efficiency_representative(entry: dict[str, Any]) -> bool:
     return entry.get("efficiency_profile_source_run_name") == entry.get("run_name")
 
 
+def _entry_stride_seconds(entry: dict[str, Any], fallback_window_seconds: float | None = None) -> Any:
+    stride = entry.get("stride_seconds")
+    if stride not in {None, ""}:
+        return stride
+    if fallback_window_seconds is not None:
+        return fallback_window_seconds
+    return entry.get("window_seconds", "unknown")
+
+
+def efficiency_profile_key_for_window(
+    entry: dict[str, Any],
+    *,
+    window_seconds: float,
+    timing_device: str = "cpu",
+    precision: str = "fp32",
+) -> tuple[str, int, Any]:
+    fs_target = entry.get("ecg_fs", 100)
+    input_length_samples = int(round(float(fs_target) * float(window_seconds)))
+    stride_seconds = _entry_stride_seconds(entry, fallback_window_seconds=window_seconds)
+    architecture_id = entry.get("efficiency_architecture_id") or Path(str(entry.get("config_path", "unknown"))).stem
+    profile_key = "__".join(
+        [
+            f"model-{_safe_key_part(entry.get('model_family'))}",
+            f"backbone-{_safe_key_part(entry.get('backbone'))}",
+            f"dims-{_safe_key_part(entry.get('dimensions'))}",
+            f"arch-{_safe_key_part(architecture_id)}",
+            f"input-{_safe_key_part(input_length_samples)}",
+            f"win-{_format_seconds_token(window_seconds)}s",
+            f"stride-{_format_seconds_token(stride_seconds)}s",
+            f"device-{_safe_key_part(timing_device)}",
+            f"precision-{_safe_key_part(precision)}",
+        ]
+    )
+    return profile_key, input_length_samples, stride_seconds
+
+
+def _normalise_window_seconds(values: list[float] | None) -> list[float]:
+    if not values:
+        return []
+    result: list[float] = []
+    seen: set[float] = set()
+    for value in values:
+        window = float(value)
+        if window <= 0:
+            raise ValueError("--efficiency-window-seconds values must be positive")
+        key = round(window, 9)
+        if key not in seen:
+            result.append(window)
+            seen.add(key)
+    return result
+
+
+def build_efficiency_context_profile_entries(
+    manifest: dict[str, Any],
+    output_root: Path,
+    window_seconds: list[float],
+) -> list[dict[str, Any]]:
+    windows = _normalise_window_seconds(window_seconds)
+    if not windows:
+        return []
+    groups: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, entry in enumerate(manifest["entries"]):
+        if _entry_complete(entry):
+            groups.setdefault(str(entry.get("efficiency_profile_key", entry["run_name"])), []).append((index, entry))
+
+    context_entries: list[dict[str, Any]] = []
+    for _, indexed_entries in groups.items():
+        source = min(indexed_entries, key=_profile_representative_score)[1]
+        for window in windows:
+            profile_key, input_length_samples, stride_seconds = efficiency_profile_key_for_window(source, window_seconds=window)
+            profile_file = output_root / "efficiency_profiles_context_length" / _safe_key_part(profile_key) / "efficiency.json"
+            context_entry = dict(source)
+            context_entry.update(
+                {
+                    "efficiency_profile_key": profile_key,
+                    "efficiency_profile_file": str(profile_file),
+                    "efficiency_profile_source_run_name": source["run_name"],
+                    "efficiency_window_seconds_override": float(window),
+                    "efficiency_input_length_samples": input_length_samples,
+                    "efficiency_stride_seconds": stride_seconds,
+                    "efficiency_profile_mode": "context_length_scaling",
+                    "status": "completed",
+                    "log_file_path": "",
+                    "return_code": "",
+                    "error_message": "",
+                }
+            )
+            context_entries.append(context_entry)
+    manifest["efficiency_context_profile_entries"] = context_entries
+    return context_entries
+
+
 def _lock_path(entry: dict[str, Any]) -> Path:
     return Path(entry["output_dir"]) / LOCK_NAME
 
 
-def acquire_run_lock(entry: dict[str, Any], *, stale_lock_minutes: float | None = None) -> Path | None:
-    run_dir = Path(entry["output_dir"])
+def acquire_run_lock(
+    entry: dict[str, Any],
+    *,
+    stale_lock_minutes: float | None = None,
+    lock_dir: Path | None = None,
+) -> Path | None:
+    run_dir = lock_dir or Path(entry["output_dir"])
     run_dir.mkdir(parents=True, exist_ok=True)
     lock_path = run_dir / LOCK_NAME
     if lock_path.exists() and stale_lock_minutes is not None:
@@ -533,6 +659,8 @@ def acquire_run_lock(entry: dict[str, Any], *, stale_lock_minutes: float | None 
     payload = json.dumps(
         {
             "run_name": entry["run_name"],
+            "efficiency_profile_key": entry.get("efficiency_profile_key", ""),
+            "efficiency_window_seconds_override": entry.get("efficiency_window_seconds_override", ""),
             "pid": os.getpid(),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
@@ -679,6 +807,78 @@ def collect_summary(manifest: dict[str, Any], output_root: Path) -> list[dict[st
     return rows
 
 
+def parse_efficiency_context_row(entry: dict[str, Any]) -> dict[str, Any]:
+    efficiency_path = Path(entry.get("efficiency_profile_file", ""))
+    row = {
+        "model_family": entry.get("model_family", ""),
+        "backbone": entry.get("backbone", ""),
+        "dimensions": entry.get("dimensions", ""),
+        "efficiency_profile_key": entry.get("efficiency_profile_key", ""),
+        "source_run_name": entry.get("efficiency_profile_source_run_name", entry.get("run_name", "")),
+        "source_checkpoint_path": entry.get("expected_checkpoint_file", ""),
+        "window_seconds": entry.get("efficiency_window_seconds_override", entry.get("window_seconds", "")),
+        "input_length_samples": entry.get("efficiency_input_length_samples", entry.get("input_length_samples", "")),
+        "stride_seconds": entry.get("efficiency_stride_seconds", entry.get("stride_seconds", "")),
+        "efficiency_file_path": str(efficiency_path) if efficiency_path.is_file() else str(efficiency_path),
+        "log_file_path": entry.get("log_file_path", ""),
+        "return_code": entry.get("return_code", ""),
+        "error_message": entry.get("error_message", ""),
+        "status": entry.get("status", "planned"),
+    }
+    if entry.get("status") in {"failed", "locked", "incompatible_input_length"}:
+        return row
+    if not efficiency_path.is_file():
+        row["status"] = "planned"
+        return row
+    try:
+        efficiency = json.loads(efficiency_path.read_text())
+    except json.JSONDecodeError as exc:
+        row["status"] = "failed"
+        row["error_message"] = f"Invalid efficiency JSON: {exc}"
+        return row
+    row.update(
+        {
+            "num_trainable_params": efficiency.get("trainable_parameters", ""),
+            "mean_window_latency_ms_batch1": efficiency.get("mean_window_latency_ms_batch1", ""),
+            "p50_window_latency_ms_batch1": efficiency.get("p50_window_latency_ms_batch1", ""),
+            "p95_window_latency_ms_batch1": efficiency.get("p95_window_latency_ms_batch1", ""),
+            "mean_record_latency_ms": efficiency.get("mean_record_latency_ms", ""),
+            "windows_per_second_batch16": efficiency.get("windows_per_second_batch16", ""),
+            "records_per_second": efficiency.get("records_per_second", ""),
+            "timing_device": efficiency.get("timing_device", efficiency.get("device", "")),
+            "timing_scope": efficiency.get("timing_scope", ""),
+            "warmup_iterations": efficiency.get("warmup_iterations", ""),
+            "measured_repeats": efficiency.get("measured_repeats", ""),
+            "window_seconds": efficiency.get("window_seconds", row["window_seconds"]),
+            "input_length_samples": efficiency.get("input_length_samples", row["input_length_samples"]),
+            "stride_seconds": efficiency.get("stride_seconds", row["stride_seconds"]),
+            "status": "success",
+        }
+    )
+    return row
+
+
+def collect_efficiency_context_length_summary(
+    manifest: dict[str, Any],
+    output_root: Path,
+    window_seconds: list[float],
+) -> list[dict[str, Any]]:
+    entries = manifest.get("efficiency_context_profile_entries")
+    if entries is None:
+        entries = build_efficiency_context_profile_entries(manifest, output_root, window_seconds)
+    rows = [parse_efficiency_context_row(entry) for entry in entries]
+    output_root.mkdir(parents=True, exist_ok=True)
+    csv_path = output_root / "efficiency_context_length_summary.csv"
+    json_path = output_root / "efficiency_context_length_summary.json"
+    with csv_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CONTEXT_LENGTH_SUMMARY_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in CONTEXT_LENGTH_SUMMARY_FIELDS})
+    json_path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n")
+    return rows
+
+
 def efficiency_command(
     entry: dict[str, Any],
     *,
@@ -687,6 +887,7 @@ def efficiency_command(
     throughput_batch_size: int,
     max_records: int | None,
     output_dir: Path | None = None,
+    window_seconds: float | None = None,
 ) -> list[str]:
     run_dir = Path(entry["output_dir"])
     cmd = [
@@ -709,6 +910,8 @@ def efficiency_command(
         cmd.extend(["--max-records", str(max_records)])
     if output_dir is not None:
         cmd.extend(["--output-dir", str(output_dir)])
+    if window_seconds is not None:
+        cmd.extend(["--window-seconds", f"{float(window_seconds):g}"])
     return cmd
 
 
@@ -723,6 +926,7 @@ def profile_entry_efficiency(
     overwrite: bool,
     log_file: Path | None = None,
     output_dir: Path | None = None,
+    window_seconds: float | None = None,
 ) -> None:
     run_dir = Path(entry["output_dir"])
     target_dir = output_dir or run_dir
@@ -742,6 +946,7 @@ def profile_entry_efficiency(
         throughput_batch_size=throughput_batch_size,
         max_records=max_records,
         output_dir=output_dir,
+        window_seconds=window_seconds,
     )
     print(f"Profiling CPU efficiency: source={run_dir} output={target_dir}", flush=True)
     if log_file is None:
@@ -756,6 +961,23 @@ def profile_entry_efficiency(
         result = subprocess.run(cmd, cwd=repo_root, stdout=f, stderr=subprocess.STDOUT, env=env)
     if result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, cmd)
+    if output_dir is not None and efficiency_path.is_file():
+        payload = json.loads(efficiency_path.read_text())
+        payload.update(
+            {
+                "efficiency_profile_key": entry.get("efficiency_profile_key", ""),
+                "efficiency_profile_source_run_name": entry.get("run_name", ""),
+                "efficiency_profile_source_output_dir": str(run_dir),
+                "efficiency_profile_mode": entry.get("efficiency_profile_mode", "shared_model_config"),
+                "latency_scaling_only": bool(entry.get("efficiency_window_seconds_override")),
+            }
+        )
+        if entry.get("efficiency_window_seconds_override") is not None:
+            payload["window_seconds_override"] = float(entry["efficiency_window_seconds_override"])
+            payload["latency_scaling_note"] = (
+                "CPU inference latency scaling by input length only; not a trained/evaluated noisy-input performance metric."
+            )
+        efficiency_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def build_work_items(
@@ -764,9 +986,25 @@ def build_work_items(
     profile_efficiency: bool = False,
     overwrite_efficiency: bool = False,
     profile_efficiency_per_condition: bool = False,
+    efficiency_window_seconds: list[float] | None = None,
 ) -> list[WorkItem]:
+    output_root = Path(str(manifest.get("output_root", ".")))
+    context_windows = _normalise_window_seconds(efficiency_window_seconds)
+    if profile_efficiency and context_windows:
+        context_entries = build_efficiency_context_profile_entries(manifest, output_root, context_windows)
+        items: list[WorkItem] = []
+        scheduled_profile_keys: set[str] = set()
+        for entry in context_entries:
+            profile_key = str(entry.get("efficiency_profile_key", entry["run_name"]))
+            if profile_key in scheduled_profile_keys:
+                continue
+            if overwrite_efficiency or not _shared_efficiency_complete(entry):
+                items.append(WorkItem("profile_efficiency", entry))
+            scheduled_profile_keys.add(profile_key)
+        return items
+
     if profile_efficiency and not profile_efficiency_per_condition:
-        assign_efficiency_profile_sources(manifest, Path(str(manifest.get("output_root", "."))))
+        assign_efficiency_profile_sources(manifest, output_root)
     items: list[WorkItem] = []
     scheduled_profile_keys: set[str] = set()
     for entry in manifest["entries"]:
@@ -820,7 +1058,7 @@ def _run_work_item(
     if item.kind == "profile_efficiency" and not profile_efficiency_per_condition and entry.get("efficiency_profile_file"):
         profile_output_dir = Path(entry["efficiency_profile_file"]).parent
     log_path = (profile_output_dir or run_dir) / ("efficiency.log" if item.kind == "profile_efficiency" else "run.log")
-    lock_path = acquire_run_lock(entry, stale_lock_minutes=stale_lock_minutes)
+    lock_path = acquire_run_lock(entry, stale_lock_minutes=stale_lock_minutes, lock_dir=profile_output_dir)
     if lock_path is None:
         return WorkResult(
             run_name=entry["run_name"],
@@ -842,6 +1080,7 @@ def _run_work_item(
                     overwrite=overwrite_efficiency,
                     log_file=log_path,
                     output_dir=profile_output_dir,
+                    window_seconds=entry.get("efficiency_window_seconds_override"),
                 )
             except subprocess.CalledProcessError as exc:
                 return WorkResult(
@@ -917,15 +1156,16 @@ def run_manifest(
     overwrite_efficiency: bool = False,
     stale_lock_minutes: float | None = None,
     profile_efficiency_per_condition: bool = False,
+    efficiency_window_seconds: list[float] | None = None,
 ) -> None:
     if keep_going:
         fail_fast = False
-    entries_by_name = {entry["run_name"]: entry for entry in manifest["entries"]}
     items = build_work_items(
         manifest,
         profile_efficiency=profile_efficiency,
         overwrite_efficiency=overwrite_efficiency,
         profile_efficiency_per_condition=profile_efficiency_per_condition,
+        efficiency_window_seconds=efficiency_window_seconds,
     )
     total = len(manifest["entries"])
     status_counts = {status: sum(1 for e in manifest["entries"] if e.get("status") == status) for status in {"planned", "completed", "failed", "locked", "profiled", "missing_config"}}
@@ -944,10 +1184,9 @@ def run_manifest(
     if jobs == 1:
         completed = 0
         failed = 0
-        for item in items:
+        for index, item in enumerate(items, start=1):
             entry = item.entry
-            index = manifest["entries"].index(entry) + 1
-            print(f"[{index}/{total}] Starting {item.kind} {entry['run_name']}")
+            print(f"[{index}/{len(items)}] Starting {item.kind} {entry['run_name']}")
             result = _run_work_item(
                 item,
                 repo_root=repo_root,
@@ -1009,7 +1248,7 @@ def run_manifest(
                     log_file=str(Path(item.entry["output_dir"]) / "run.log"),
                     error_message=str(exc),
                 )
-            entry = entries_by_name[result.run_name]
+            entry = item.entry
             apply_result_to_entry(result, entry)
             completed += result.status in {"completed", "profiled"}
             failed += result.status == "failed"
@@ -1048,11 +1287,14 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--overwrite-efficiency", action="store_true")
     p.add_argument("--efficiency-warmup", type=int, default=5)
     p.add_argument("--efficiency-repeats", type=int, default=10)
+    p.add_argument("--efficiency-window-seconds", nargs="+", type=float, default=None)
     p.add_argument("--efficiency-throughput-batch-size", type=int, default=16)
     p.add_argument("--efficiency-max-records", type=int, default=None)
     args = p.parse_args()
     if args.jobs < 1:
         p.error("--jobs must be >= 1")
+    if args.efficiency_window_seconds and any(value <= 0 for value in args.efficiency_window_seconds):
+        p.error("--efficiency-window-seconds values must be positive")
     return args
 
 
@@ -1104,10 +1346,11 @@ def main() -> None:
             profile_efficiency=args.profile_efficiency,
             overwrite_efficiency=args.overwrite_efficiency,
             profile_efficiency_per_condition=args.profile_efficiency_per_condition,
+            efficiency_window_seconds=args.efficiency_window_seconds,
         )
         dry_train = sum(1 for item in dry_items if item.kind == "train_condition")
         dry_profiles = sum(1 for item in dry_items if item.kind == "profile_efficiency")
-        mode = "per-condition" if args.profile_efficiency_per_condition else "shared-profile"
+        mode = "context-length" if args.efficiency_window_seconds else ("per-condition" if args.profile_efficiency_per_condition else "shared-profile")
         print(
             "DRY-RUN work summary: "
             f"train={dry_train}, efficiency_profiles={dry_profiles}, "
@@ -1131,6 +1374,7 @@ def main() -> None:
             overwrite_efficiency=args.overwrite_efficiency,
             stale_lock_minutes=args.stale_lock_minutes,
             profile_efficiency_per_condition=args.profile_efficiency_per_condition,
+            efficiency_window_seconds=args.efficiency_window_seconds,
         )
     finally:
         assign_efficiency_profile_sources(
@@ -1141,6 +1385,12 @@ def main() -> None:
         write_manifest(manifest, manifest_path)
         rows = collect_summary(manifest, output_root)
         print(f"Wrote summary: {output_root / 'summary.csv'} ({len(rows)} row(s))")
+        if args.efficiency_window_seconds:
+            context_rows = collect_efficiency_context_length_summary(manifest, output_root, args.efficiency_window_seconds)
+            print(
+                f"Wrote context-length efficiency summary: "
+                f"{output_root / 'efficiency_context_length_summary.csv'} ({len(context_rows)} row(s))"
+            )
 
 
 if __name__ == "__main__":
