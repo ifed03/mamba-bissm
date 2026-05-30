@@ -1,7 +1,0 @@
-{
-  "threshold": 0.9367022514343262,
-  "threshold_source": "clean_val",
-  "checkpoint_source": "clean_val",
-  "checkpoint": "runs/smoke_fixed_bissm_win4s/checkpoints/best.ckpt",
-  "split_path": "splits/holdout_seed42/split.json"
-}

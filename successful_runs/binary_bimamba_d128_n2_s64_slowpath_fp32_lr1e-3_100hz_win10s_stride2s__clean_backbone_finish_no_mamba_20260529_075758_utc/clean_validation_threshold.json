@@ -1,6 +1,0 @@
-{
-  "threshold": 0.8382853865623474,
-  "threshold_source": "clean_val",
-  "checkpoint_source": "clean_val",
-  "checkpoint": "runs/binary_bimamba_d128_n2_s64_slowpath_fp32_lr1e-3_100hz_win10s_stride2s__clean_backbone_finish_no_mamba_20260529_075758_utc/checkpoints/best.ckpt"
-}
