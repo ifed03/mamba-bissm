@@ -6,7 +6,6 @@ import pandas as pd
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
-from tqdm import tqdm
 
 from evaluate.evaluator import evaluate_record_level
 from evaluate.noise_protocol import (
@@ -217,7 +216,7 @@ def _run_epoch(
 ):
     model.train()
     losses = []
-    for batch_index, b in enumerate(tqdm(loader, leave=False)):
+    for batch_index, b in enumerate(loader):
         x, y = b["x"].to(device), b["y"].to(device)
         optimizer.zero_grad()
 
@@ -431,7 +430,18 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
                 "val_time_seconds": float(val_time_seconds),
             }
         )
+        print(
+            "Epoch summary: "
+            f"run={run_dir.name}, epoch={epoch + 1}/{cfg['training']['epochs']}, "
+            f"train_loss={float(tr_loss):.6g}, val_{score_name}={float(score):.6g}, "
+            f"best_{best_metric_name}={float(best_metric):.6g}, bad_epochs={bad}, "
+            f"epoch_time_seconds={float(epoch_time_seconds):.2f}"
+        )
         if bad >= cfg["training"]["patience"]:
+            print(
+                "Early stopping: "
+                f"run={run_dir.name}, epoch={epoch + 1}, patience={cfg['training']['patience']}"
+            )
             break
 
     training_time_seconds = time.perf_counter() - train_start

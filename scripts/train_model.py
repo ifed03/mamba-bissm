@@ -197,11 +197,9 @@ def main():
                 )
                 for split_name, loader in [("train", train_loader), ("val", val_loader), ("test", test_loader)]:
                     print(
-                        f"Progress split={split_name}: records={len(loader.dataset.record_ids)}, "
-                        f"segments={len(loader.dataset)}, noise_metadata={len(loader.dataset.noise_metadata)}"
+                        f"Prepared split={split_name}: records={len(loader.dataset.record_ids)}, "
+                        f"segments={len(loader.dataset)}, noisy_records={len(loader.dataset.noise_metadata)}"
                     )
-                    if loader.dataset.noise_metadata:
-                        print(f"First metadata rows split={split_name}: {loader.dataset.noise_metadata[:3]}")
                 run_cfg = dict(cfg)
                 run_cfg["noise_training"] = {
                     "mode": "noisy-input",
