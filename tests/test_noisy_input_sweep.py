@@ -1,4 +1,6 @@
 import json
+import os
+import time
 import subprocess
 import sys
 from pathlib import Path
@@ -206,3 +208,227 @@ def test_smoke_subset_contains_only_requested_small_subset(tmp_path):
     assert {entry["noise_type"] for entry in manifest["entries"]} == {"bw"}
     assert {entry["snr_db"] for entry in manifest["entries"]} == {18.0}
     assert all("smoke" in entry["config_path"] for entry in manifest["entries"])
+
+
+
+def _write_complete_outputs(entry):
+    _write_success_metrics(entry)
+    ckpt = Path(entry["expected_checkpoint_file"])
+    ckpt.parent.mkdir(parents=True, exist_ok=True)
+    ckpt.write_text("checkpoint")
+
+
+def test_jobs_defaults_to_one(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["run_noisy_input_sweep.py", "--dry-run"])
+    args = sweep._parse_args()
+    assert args.jobs == 1
+
+
+def test_invalid_jobs_zero_fails_clearly(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["run_noisy_input_sweep.py", "--jobs", "0"])
+    with pytest.raises(SystemExit):
+        sweep._parse_args()
+    assert "--jobs must be >= 1" in capsys.readouterr().err
+
+
+def test_jobs_one_preserves_sequential_execution_order(tmp_path, monkeypatch):
+    manifest = _manifest(
+        tmp_path,
+        models=["ecgmamba_mamba"],
+        noise_types=["bw"],
+        snr_db=[24.0, 18.0, 12.0],
+    )
+    seen = []
+
+    def fake_run(item, **kwargs):
+        seen.append(item.entry["run_name"])
+        return sweep.WorkResult(item.entry["run_name"], item.kind, "completed", 0, "log")
+
+    monkeypatch.setattr(sweep, "_run_work_item", fake_run)
+    sweep.run_manifest(manifest, repo_root=REPO_ROOT, jobs=1)
+    assert seen == [entry["run_name"] for entry in manifest["entries"]]
+
+
+def test_jobs_four_schedules_multiple_independent_conditions(tmp_path, monkeypatch):
+    manifest = _manifest(
+        tmp_path,
+        models=["ecgmamba_mamba"],
+        noise_types=["bw", "em"],
+        snr_db=[24.0, 18.0],
+    )
+    submitted = []
+
+    class ImmediateFuture:
+        def __init__(self, result):
+            self._result = result
+        def result(self):
+            return self._result
+
+    class FakeExecutor:
+        def __init__(self, max_workers):
+            self.max_workers = max_workers
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def submit(self, fn, item, **kwargs):
+            submitted.append(item.entry["run_name"])
+            return ImmediateFuture(sweep.WorkResult(item.entry["run_name"], item.kind, "completed", 0, "log"))
+
+    monkeypatch.setattr(sweep, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(sweep, "as_completed", lambda futures: list(futures))
+    sweep.run_manifest(manifest, repo_root=REPO_ROOT, jobs=4)
+    assert len(submitted) == 4
+    assert len(set(submitted)) == 4
+
+
+def test_unique_run_names_and_output_dirs_before_parallel_launch(tmp_path):
+    manifest = _manifest(tmp_path)
+    sweep.validate_manifest(manifest, repo_root=REPO_ROOT)
+    names = [entry["run_name"] for entry in manifest["entries"]]
+    dirs = [entry["output_dir"] for entry in manifest["entries"]]
+    assert len(names) == len(set(names))
+    assert len(dirs) == len(set(dirs))
+
+
+def test_completed_run_is_skipped_under_resume(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    entry = manifest["entries"][0]
+    _write_complete_outputs(entry)
+    sweep.mark_resume_statuses(manifest)
+    assert entry["status"] == "completed"
+    assert sweep.build_work_items(manifest) == []
+
+
+def test_completed_run_missing_efficiency_is_scheduled_for_profiling(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    entry = manifest["entries"][0]
+    _write_complete_outputs(entry)
+    sweep.mark_resume_statuses(manifest)
+    items = sweep.build_work_items(manifest, profile_efficiency=True)
+    assert [(item.kind, item.entry["run_name"]) for item in items] == [("profile_efficiency", entry["run_name"])]
+
+
+def test_existing_lock_prevents_duplicate_execution(tmp_path):
+    entry = _base_entry(tmp_path)
+    run_dir = Path(entry["output_dir"])
+    run_dir.mkdir(parents=True)
+    (run_dir / sweep.LOCK_NAME).write_text("busy")
+    result = sweep._run_work_item(
+        sweep.WorkItem("train_condition", entry),
+        repo_root=REPO_ROOT,
+        profile_efficiency=False,
+        efficiency_warmup=1,
+        efficiency_repeats=1,
+        efficiency_throughput_batch_size=1,
+        efficiency_max_records=None,
+        overwrite_efficiency=False,
+        stale_lock_minutes=None,
+    )
+    assert result.status == "locked"
+
+
+def test_stale_lock_can_be_replaced(tmp_path):
+    entry = _base_entry(tmp_path)
+    run_dir = Path(entry["output_dir"])
+    run_dir.mkdir(parents=True)
+    lock = run_dir / sweep.LOCK_NAME
+    lock.write_text("old")
+    old = time.time() - 7200
+    os.utime(lock, (old, old))
+    acquired = sweep.acquire_run_lock(entry, stale_lock_minutes=1)
+    try:
+        assert acquired == lock
+        assert "run_name" in lock.read_text()
+    finally:
+        sweep.release_run_lock(acquired)
+
+
+def test_failed_subprocess_is_recorded_without_stopping_unrelated_runs(tmp_path, monkeypatch):
+    manifest = _manifest(
+        tmp_path,
+        models=["ecgmamba_mamba"],
+        noise_types=["bw"],
+        snr_db=[24.0, 18.0],
+    )
+    failing = manifest["entries"][0]["run_name"]
+
+    def fake_run(cmd, *, cwd, log_path):
+        return 7 if failing in str(log_path) else 0
+
+    monkeypatch.setattr(sweep, "_run_subprocess_to_log", fake_run)
+    sweep.run_manifest(manifest, repo_root=REPO_ROOT, jobs=2)
+    statuses = {entry["run_name"]: entry["status"] for entry in manifest["entries"]}
+    assert statuses[failing] == "failed"
+    assert list(statuses.values()).count("completed") == 1
+    assert manifest["entries"][0]["return_code"] == 7
+
+
+def test_per_run_log_paths_are_created_and_recorded(tmp_path, monkeypatch):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    monkeypatch.setattr(sweep, "_run_subprocess_to_log", lambda cmd, *, cwd, log_path: (log_path.write_text("log"), 0)[1])
+    sweep.run_manifest(manifest, repo_root=REPO_ROOT, jobs=1)
+    entry = manifest["entries"][0]
+    assert entry["log_file_path"].endswith("run.log")
+    assert Path(entry["log_file_path"]).is_file()
+
+
+def test_summary_aggregation_still_works_after_parallel_execution(tmp_path, monkeypatch):
+    manifest = _manifest(
+        tmp_path,
+        models=["ecgmamba_mamba"],
+        noise_types=["bw"],
+        snr_db=[24.0, 18.0],
+    )
+
+    def fake_run(cmd, *, cwd, log_path):
+        run_name = log_path.parent.name
+        entry = next(e for e in manifest["entries"] if e["run_name"] == run_name)
+        _write_complete_outputs(entry)
+        log_path.write_text("ok")
+        return 0
+
+    monkeypatch.setattr(sweep, "_run_subprocess_to_log", fake_run)
+    sweep.run_manifest(manifest, repo_root=REPO_ROOT, jobs=2)
+    rows = sweep.collect_summary(manifest, tmp_path / "runs")
+    assert len(rows) == 2
+    assert {row["status"] for row in rows} == {"success"}
+
+
+def test_dry_run_with_jobs_four_writes_manifest_but_launches_no_subprocesses(tmp_path):
+    out = tmp_path / "dry_run_jobs"
+    cmd = [
+        sys.executable,
+        "scripts/run_noisy_input_sweep.py",
+        "--dry-run",
+        "--jobs",
+        "4",
+        "--models",
+        "ecgmamba_mamba",
+        "--noise-types",
+        "bw",
+        "--snr-db",
+        "18",
+        "--output-root",
+        str(out),
+        "--python",
+        "python",
+    ]
+    result = subprocess.run(cmd, cwd=REPO_ROOT, text=True, capture_output=True, check=True)
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert "DRY-RUN complete" in result.stdout
+    assert manifest["entries"][0]["command"][0] == "python"
+    assert not Path(manifest["entries"][0]["output_dir"]).exists()
+
+
+def test_smoke_mode_accepts_jobs_two(tmp_path):
+    manifest = _manifest(tmp_path, smoke=True)
+    assert len(manifest["entries"]) == 2
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(sys, "argv", ["run_noisy_input_sweep.py", "--smoke", "--jobs", "2"])
+        args = sweep._parse_args()
+        assert args.smoke is True
+        assert args.jobs == 2
+    finally:
+        monkeypatch.undo()

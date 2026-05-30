@@ -7,8 +7,11 @@ import argparse
 import ast
 import csv
 import json
+import os
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +22,7 @@ SNR_DB = (24.0, 18.0, 12.0, 6.0, 0.0, -6.0)
 REQUIRED_NSTDB_FILES = ("bw.hea", "bw.dat", "em.hea", "em.dat", "ma.hea", "ma.dat")
 PROCESSING_ORDER = "resample->noise->window->normalize"
 NOISY_VAL = "noisy_val"
+LOCK_NAME = ".run.lock"
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,22 @@ class ModelSpec:
     backbone: str
     config_path: str
     smoke_config_path: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkItem:
+    kind: str
+    entry: dict[str, Any]
+
+
+@dataclass
+class WorkResult:
+    run_name: str
+    kind: str
+    status: str
+    return_code: int | None = None
+    log_file: str | None = None
+    error_message: str | None = None
 
 
 MODEL_SPECS: tuple[ModelSpec, ...] = (
@@ -101,6 +121,9 @@ SUMMARY_FIELDS = (
     "throughput_records_per_second",
     "throughput_windows_per_second",
     "efficiency_file_path",
+    "log_file_path",
+    "return_code",
+    "error_message",
     "status",
 )
 
@@ -371,10 +394,52 @@ def _entry_complete(entry: dict[str, Any]) -> bool:
     )
 
 
+def _efficiency_complete(entry: dict[str, Any]) -> bool:
+    return (Path(entry["output_dir"]) / "efficiency.json").is_file()
+
+
 def mark_resume_statuses(manifest: dict[str, Any]) -> None:
     for entry in manifest["entries"]:
         if entry.get("status") == "planned" and _entry_complete(entry):
             entry["status"] = "completed"
+
+
+def _lock_path(entry: dict[str, Any]) -> Path:
+    return Path(entry["output_dir"]) / LOCK_NAME
+
+
+def acquire_run_lock(entry: dict[str, Any], *, stale_lock_minutes: float | None = None) -> Path | None:
+    run_dir = Path(entry["output_dir"])
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = run_dir / LOCK_NAME
+    if lock_path.exists() and stale_lock_minutes is not None:
+        age_minutes = (time.time() - lock_path.stat().st_mtime) / 60.0
+        if age_minutes >= stale_lock_minutes:
+            lock_path.unlink()
+    payload = json.dumps(
+        {
+            "run_name": entry["run_name"],
+            "pid": os.getpid(),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+        sort_keys=True,
+    )
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return None
+    with os.fdopen(fd, "w") as f:
+        f.write(payload + "\n")
+    return lock_path
+
+
+def release_run_lock(lock_path: Path | None) -> None:
+    if lock_path is None:
+        return
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _metric(metrics: dict[str, Any], split: str, name: str) -> Any:
@@ -398,9 +463,12 @@ def parse_summary_row(entry: dict[str, Any]) -> dict[str, Any]:
         "threshold_file_path": str(threshold_path),
         "checkpoint_path": entry.get("expected_checkpoint_file", ""),
         "efficiency_file_path": str(efficiency_path) if efficiency_path.is_file() else "",
+        "log_file_path": entry.get("log_file_path", ""),
+        "return_code": entry.get("return_code", ""),
+        "error_message": entry.get("error_message", ""),
         "status": entry.get("status", "planned"),
     }
-    if row["status"] in {"missing_config", "skipped", "failed"} or not metrics_path.is_file():
+    if row["status"] in {"missing_config", "skipped", "failed", "locked"} or not metrics_path.is_file():
         row.update({field: "" for field in SUMMARY_FIELDS if field not in row})
         if row["status"] == "planned":
             row["status"] = "skipped"
@@ -495,33 +563,22 @@ def collect_summary(manifest: dict[str, Any], output_root: Path) -> list[dict[st
     return rows
 
 
-def profile_entry_efficiency(
+def efficiency_command(
     entry: dict[str, Any],
     *,
-    repo_root: Path,
     warmup: int,
     repeats: int,
     throughput_batch_size: int,
     max_records: int | None,
-    overwrite: bool,
-) -> None:
+) -> list[str]:
     run_dir = Path(entry["output_dir"])
-    efficiency_path = run_dir / "efficiency.json"
-    if efficiency_path.is_file() and not overwrite:
-        print(f"Efficiency exists, skipping: {efficiency_path}")
-        return
-    config_path = run_dir / "config_resolved.yaml"
-    checkpoint_path = Path(entry["expected_checkpoint_file"])
-    if not config_path.is_file() or not checkpoint_path.is_file():
-        print(f"Efficiency skipped, missing config/checkpoint: {run_dir}")
-        return
     cmd = [
-        sys.executable,
+        entry["command"][0],
         "scripts/profile_efficiency.py",
         "--config",
-        str(config_path),
+        str(run_dir / "config_resolved.yaml"),
         "--ckpt",
-        str(checkpoint_path),
+        str(entry["expected_checkpoint_file"]),
         "--device",
         "cpu",
         "--warmup",
@@ -533,14 +590,180 @@ def profile_entry_efficiency(
     ]
     if max_records is not None:
         cmd.extend(["--max-records", str(max_records)])
+    return cmd
+
+
+def profile_entry_efficiency(
+    entry: dict[str, Any],
+    *,
+    repo_root: Path,
+    warmup: int,
+    repeats: int,
+    throughput_batch_size: int,
+    max_records: int | None,
+    overwrite: bool,
+    log_file: Path | None = None,
+) -> None:
+    run_dir = Path(entry["output_dir"])
+    efficiency_path = run_dir / "efficiency.json"
+    if efficiency_path.is_file() and not overwrite:
+        print(f"Efficiency exists, skipping: {efficiency_path}")
+        return
+    config_path = run_dir / "config_resolved.yaml"
+    checkpoint_path = Path(entry["expected_checkpoint_file"])
+    if not config_path.is_file() or not checkpoint_path.is_file():
+        print(f"Efficiency skipped, missing config/checkpoint: {run_dir}")
+        return
+    cmd = efficiency_command(
+        entry,
+        warmup=warmup,
+        repeats=repeats,
+        throughput_batch_size=throughput_batch_size,
+        max_records=max_records,
+    )
     print(f"Profiling CPU efficiency: {run_dir}")
-    subprocess.run(cmd, cwd=repo_root, check=True)
+    if log_file is None:
+        subprocess.run(cmd, cwd=repo_root, check=True)
+        return
+    with log_file.open("a") as f:
+        f.write(f"\n$ {' '.join(cmd)}\n")
+        result = subprocess.run(cmd, cwd=repo_root, stdout=f, stderr=subprocess.STDOUT)
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, cmd)
+
+
+def build_work_items(
+    manifest: dict[str, Any],
+    *,
+    profile_efficiency: bool = False,
+    overwrite_efficiency: bool = False,
+) -> list[WorkItem]:
+    items: list[WorkItem] = []
+    for entry in manifest["entries"]:
+        if entry.get("status") not in {"planned", "completed"}:
+            continue
+        complete = _entry_complete(entry)
+        if complete:
+            entry["status"] = "completed"
+            if profile_efficiency and (overwrite_efficiency or not _efficiency_complete(entry)):
+                items.append(WorkItem("profile_efficiency", entry))
+            continue
+        if entry.get("status") == "planned":
+            items.append(WorkItem("train_condition", entry))
+    return items
+
+
+def _run_subprocess_to_log(cmd: list[str], *, cwd: Path, log_path: Path) -> int:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a") as f:
+        f.write(f"\n$ {' '.join(cmd)}\n")
+        f.flush()
+        result = subprocess.run(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT)
+    return int(result.returncode)
+
+
+def _run_work_item(
+    item: WorkItem,
+    *,
+    repo_root: Path,
+    profile_efficiency: bool,
+    efficiency_warmup: int,
+    efficiency_repeats: int,
+    efficiency_throughput_batch_size: int,
+    efficiency_max_records: int | None,
+    overwrite_efficiency: bool,
+    stale_lock_minutes: float | None,
+) -> WorkResult:
+    entry = item.entry
+    run_dir = Path(entry["output_dir"])
+    log_path = run_dir / ("efficiency.log" if item.kind == "profile_efficiency" else "run.log")
+    lock_path = acquire_run_lock(entry, stale_lock_minutes=stale_lock_minutes)
+    if lock_path is None:
+        return WorkResult(
+            run_name=entry["run_name"],
+            kind=item.kind,
+            status="locked",
+            log_file=str(log_path),
+            error_message=f"Run lock exists: {_lock_path(entry)}",
+        )
+    try:
+        if item.kind == "profile_efficiency":
+            try:
+                profile_entry_efficiency(
+                    entry,
+                    repo_root=repo_root,
+                    warmup=efficiency_warmup,
+                    repeats=efficiency_repeats,
+                    throughput_batch_size=efficiency_throughput_batch_size,
+                    max_records=efficiency_max_records,
+                    overwrite=overwrite_efficiency,
+                    log_file=log_path,
+                )
+            except subprocess.CalledProcessError as exc:
+                return WorkResult(
+                    run_name=entry["run_name"],
+                    kind=item.kind,
+                    status="failed",
+                    return_code=int(exc.returncode),
+                    log_file=str(log_path),
+                    error_message=f"Efficiency profiling failed with return code {exc.returncode}",
+                )
+            return WorkResult(entry["run_name"], item.kind, "profiled", 0, str(log_path))
+
+        return_code = _run_subprocess_to_log(entry["command"], cwd=repo_root, log_path=log_path)
+        if return_code != 0:
+            return WorkResult(
+                run_name=entry["run_name"],
+                kind=item.kind,
+                status="failed",
+                return_code=return_code,
+                log_file=str(log_path),
+                error_message=f"Training command failed with return code {return_code}",
+            )
+        if profile_efficiency:
+            try:
+                profile_entry_efficiency(
+                    entry,
+                    repo_root=repo_root,
+                    warmup=efficiency_warmup,
+                    repeats=efficiency_repeats,
+                    throughput_batch_size=efficiency_throughput_batch_size,
+                    max_records=efficiency_max_records,
+                    overwrite=overwrite_efficiency,
+                    log_file=log_path,
+                )
+            except subprocess.CalledProcessError as exc:
+                return WorkResult(
+                    run_name=entry["run_name"],
+                    kind=item.kind,
+                    status="failed",
+                    return_code=int(exc.returncode),
+                    log_file=str(log_path),
+                    error_message=f"Efficiency profiling failed with return code {exc.returncode}",
+                )
+        return WorkResult(entry["run_name"], item.kind, "completed", 0, str(log_path))
+    finally:
+        release_run_lock(lock_path)
+
+
+def apply_result_to_entry(result: WorkResult, entry: dict[str, Any]) -> None:
+    entry["log_file_path"] = result.log_file or ""
+    entry["return_code"] = result.return_code
+    entry["error_message"] = result.error_message or ""
+    if result.status == "profiled":
+        entry["status"] = "profiled"
+    elif result.status == "completed":
+        entry["status"] = "completed"
+    elif result.status in {"failed", "locked"}:
+        entry["status"] = result.status
 
 
 def run_manifest(
     manifest: dict[str, Any],
     *,
     repo_root: Path,
+    jobs: int = 1,
+    fail_fast: bool = False,
     keep_going: bool = False,
     profile_efficiency: bool = False,
     efficiency_warmup: int = 20,
@@ -548,42 +771,100 @@ def run_manifest(
     efficiency_throughput_batch_size: int = 16,
     efficiency_max_records: int | None = None,
     overwrite_efficiency: bool = False,
+    stale_lock_minutes: float | None = None,
 ) -> None:
-    entries = manifest["entries"]
-    total = len(entries)
-    for index, entry in enumerate(entries, start=1):
-        if entry["status"] != "planned":
-            print(f"[{index}/{total}] SKIP {entry['run_name']} status={entry['status']}")
-            if profile_efficiency:
-                profile_entry_efficiency(
-                    entry,
-                    repo_root=repo_root,
-                    warmup=efficiency_warmup,
-                    repeats=efficiency_repeats,
-                    throughput_batch_size=efficiency_throughput_batch_size,
-                    max_records=efficiency_max_records,
-                    overwrite=overwrite_efficiency,
+    if keep_going:
+        fail_fast = False
+    entries_by_name = {entry["run_name"]: entry for entry in manifest["entries"]}
+    items = build_work_items(
+        manifest,
+        profile_efficiency=profile_efficiency,
+        overwrite_efficiency=overwrite_efficiency,
+    )
+    total = len(manifest["entries"])
+    if not items:
+        print(f"No runnable work items. completed={sum(1 for e in manifest['entries'] if e.get('status') == 'completed')} total={total}")
+        return
+
+    if jobs == 1:
+        completed = 0
+        failed = 0
+        for item in items:
+            entry = item.entry
+            index = manifest["entries"].index(entry) + 1
+            print(f"[{index}/{total}] Starting {item.kind} {entry['run_name']}")
+            result = _run_work_item(
+                item,
+                repo_root=repo_root,
+                profile_efficiency=profile_efficiency,
+                efficiency_warmup=efficiency_warmup,
+                efficiency_repeats=efficiency_repeats,
+                efficiency_throughput_batch_size=efficiency_throughput_batch_size,
+                efficiency_max_records=efficiency_max_records,
+                overwrite_efficiency=overwrite_efficiency,
+                stale_lock_minutes=stale_lock_minutes,
+            )
+            apply_result_to_entry(result, entry)
+            completed += result.status in {"completed", "profiled"}
+            failed += result.status == "failed"
+            print(
+                f"Finished {entry['run_name']} status={result.status} "
+                f"completed={completed} failed={failed} remaining={len(items) - completed - failed}"
+            )
+            if result.status == "failed" and fail_fast:
+                raise subprocess.CalledProcessError(result.return_code or 1, entry["command"])
+        return
+
+    print(f"Starting parallel noisy-input work: jobs={jobs}, work_items={len(items)}, total_runs={total}")
+    completed = 0
+    failed = 0
+    running = 0
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        future_to_item = {}
+        for item in items:
+            future = executor.submit(
+                _run_work_item,
+                item,
+                repo_root=repo_root,
+                profile_efficiency=profile_efficiency,
+                efficiency_warmup=efficiency_warmup,
+                efficiency_repeats=efficiency_repeats,
+                efficiency_throughput_batch_size=efficiency_throughput_batch_size,
+                efficiency_max_records=efficiency_max_records,
+                overwrite_efficiency=overwrite_efficiency,
+                stale_lock_minutes=stale_lock_minutes,
+            )
+            future_to_item[future] = item
+            running += 1
+            print(f"START {item.kind} {item.entry['run_name']} running={min(running, jobs)}")
+
+        first_failure: subprocess.CalledProcessError | None = None
+        for future in as_completed(future_to_item):
+            item = future_to_item[future]
+            try:
+                result = future.result()
+            except Exception as exc:  # defensive: worker should normally return WorkResult
+                result = WorkResult(
+                    run_name=item.entry["run_name"],
+                    kind=item.kind,
+                    status="failed",
+                    return_code=1,
+                    log_file=str(Path(item.entry["output_dir"]) / "run.log"),
+                    error_message=str(exc),
                 )
-            continue
-        print(f"[{index}/{total}] Starting noisy-input run {entry['run_name']}")
-        print(f"[{index}/{total}] Command: {entry['command_str']}")
-        try:
-            subprocess.run(entry["command"], cwd=repo_root, check=True)
-            entry["status"] = "completed"
-            if profile_efficiency:
-                profile_entry_efficiency(
-                    entry,
-                    repo_root=repo_root,
-                    warmup=efficiency_warmup,
-                    repeats=efficiency_repeats,
-                    throughput_batch_size=efficiency_throughput_batch_size,
-                    max_records=efficiency_max_records,
-                    overwrite=overwrite_efficiency,
-                )
-        except subprocess.CalledProcessError:
-            entry["status"] = "failed"
-            if not keep_going:
-                raise
+            entry = entries_by_name[result.run_name]
+            apply_result_to_entry(result, entry)
+            completed += result.status in {"completed", "profiled"}
+            failed += result.status == "failed"
+            running -= 1
+            print(
+                f"FINISH {result.kind} {result.run_name} status={result.status} "
+                f"completed={completed} running={max(running, 0)} failed={failed}"
+            )
+            if result.status == "failed" and fail_fast and first_failure is None:
+                first_failure = subprocess.CalledProcessError(result.return_code or 1, entry["command"])
+        if first_failure is not None:
+            raise first_failure
 
 
 def _parse_args() -> argparse.Namespace:
@@ -602,13 +883,19 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--keep-going", action="store_true")
+    p.add_argument("--fail-fast", action="store_true")
+    p.add_argument("--jobs", type=int, default=1, help="Maximum independent conditions to run concurrently.")
+    p.add_argument("--stale-lock-minutes", type=float, default=None)
     p.add_argument("--profile-efficiency", action="store_true")
     p.add_argument("--overwrite-efficiency", action="store_true")
     p.add_argument("--efficiency-warmup", type=int, default=20)
     p.add_argument("--efficiency-repeats", type=int, default=100)
     p.add_argument("--efficiency-throughput-batch-size", type=int, default=16)
     p.add_argument("--efficiency-max-records", type=int, default=None)
-    return p.parse_args()
+    args = p.parse_args()
+    if args.jobs < 1:
+        p.error("--jobs must be >= 1")
+    return args
 
 
 def main() -> None:
@@ -651,6 +938,8 @@ def main() -> None:
         run_manifest(
             manifest,
             repo_root=repo_root,
+            jobs=args.jobs,
+            fail_fast=args.fail_fast,
             keep_going=args.keep_going,
             profile_efficiency=args.profile_efficiency,
             efficiency_warmup=args.efficiency_warmup,
@@ -658,6 +947,7 @@ def main() -> None:
             efficiency_throughput_batch_size=args.efficiency_throughput_batch_size,
             efficiency_max_records=args.efficiency_max_records,
             overwrite_efficiency=args.overwrite_efficiency,
+            stale_lock_minutes=args.stale_lock_minutes,
         )
     finally:
         write_manifest(manifest, manifest_path)
