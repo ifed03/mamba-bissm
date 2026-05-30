@@ -432,3 +432,107 @@ def test_smoke_mode_accepts_jobs_two(tmp_path):
         assert args.jobs == 2
     finally:
         monkeypatch.undo()
+
+
+
+def _complete_manifest(manifest):
+    for entry in manifest["entries"]:
+        _write_complete_outputs(entry)
+    sweep.mark_resume_statuses(manifest)
+
+
+def _write_shared_efficiency(entry, *, trainable=1234, record_latency_ms=12.5):
+    efficiency_path = Path(entry["efficiency_profile_file"])
+    efficiency_path.parent.mkdir(parents=True, exist_ok=True)
+    efficiency_path.write_text(
+        json.dumps(
+            {
+                "trainable_parameters": trainable,
+                "mean_record_latency_ms": record_latency_ms,
+                "mean_window_latency_ms_batch1": 3.5,
+                "records_per_second": 80.0,
+                "windows_per_second_batch16": 160.0,
+                "warmup_iterations": 5,
+                "measured_repeats": 10,
+            }
+        )
+    )
+    (efficiency_path.parent / "efficiency_record_latency.csv").write_text("record_id,latency_ms\nr1,10\nr2,15\n")
+
+
+def test_default_efficiency_profiles_once_per_unique_model_config(tmp_path):
+    manifest = _manifest(tmp_path)
+    _complete_manifest(manifest)
+    sweep.assign_efficiency_profile_sources(manifest, tmp_path / "runs")
+    items = sweep.build_work_items(manifest, profile_efficiency=True)
+    profile_items = [item for item in items if item.kind == "profile_efficiency"]
+    assert len(profile_items) == 6
+    assert len({item.entry["efficiency_profile_key"] for item in profile_items}) == 6
+
+
+def test_profile_efficiency_per_condition_schedules_all_completed_conditions(tmp_path):
+    manifest = _manifest(tmp_path)
+    _complete_manifest(manifest)
+    sweep.assign_efficiency_profile_sources(manifest, tmp_path / "runs", per_condition=True)
+    items = sweep.build_work_items(
+        manifest,
+        profile_efficiency=True,
+        profile_efficiency_per_condition=True,
+    )
+    assert len([item for item in items if item.kind == "profile_efficiency"]) == 108
+
+
+def test_summary_uses_shared_efficiency_values_for_every_run(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0, 12.0])
+    _complete_manifest(manifest)
+    sweep.assign_efficiency_profile_sources(manifest, tmp_path / "runs")
+    representative = next(e for e in manifest["entries"] if e["run_name"] == e["efficiency_profile_source_run_name"])
+    _write_shared_efficiency(representative)
+
+    rows = sweep.collect_summary(manifest, tmp_path / "runs")
+    assert len(rows) == 2
+    assert {row["inference_latency_ms_per_record"] for row in rows} == {12.5}
+    assert {row["num_trainable_params"] for row in rows} == {1234}
+    assert {row["efficiency_file_path"] for row in rows} == {representative["efficiency_profile_file"]}
+    assert {row["efficiency_profile_source_run_name"] for row in rows} == {representative["run_name"]}
+
+
+def test_summary_writes_efficiency_profile_key_and_source_columns(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    _complete_manifest(manifest)
+    sweep.assign_efficiency_profile_sources(manifest, tmp_path / "runs")
+    _write_shared_efficiency(manifest["entries"][0])
+
+    sweep.collect_summary(manifest, tmp_path / "runs")
+    header = (tmp_path / "runs" / "summary.csv").read_text().splitlines()[0].split(",")
+    assert "efficiency_profile_key" in header
+    assert "efficiency_profile_source_run_name" in header
+    row = sweep.parse_summary_row(manifest["entries"][0])
+    assert row["efficiency_profile_key"]
+    assert row["efficiency_profile_source_run_name"] == manifest["entries"][0]["run_name"]
+
+
+def test_representative_selection_prefers_bw_18db(tmp_path):
+    manifest = _manifest(
+        tmp_path,
+        models=["ecgmamba_mamba"],
+        noise_types=["em", "bw"],
+        snr_db=[24.0, 18.0],
+    )
+    _complete_manifest(manifest)
+    sweep.assign_efficiency_profile_sources(manifest, tmp_path / "runs")
+    expected = next(e for e in manifest["entries"] if e["noise_type"] == "bw" and e["snr_db"] == 18.0)
+    assert {entry["efficiency_profile_source_run_name"] for entry in manifest["entries"]} == {expected["run_name"]}
+
+
+def test_shared_efficiency_profiles_reused_under_resume_when_present(tmp_path):
+    manifest = _manifest(tmp_path)
+    _complete_manifest(manifest)
+    sweep.assign_efficiency_profile_sources(manifest, tmp_path / "runs")
+    representative_items = sweep.build_work_items(manifest, profile_efficiency=True)
+    assert len(representative_items) == 6
+
+    _write_shared_efficiency(representative_items[0].entry)
+    items_after_one_shared_exists = sweep.build_work_items(manifest, profile_efficiency=True)
+    assert len([item for item in items_after_one_shared_exists if item.kind == "profile_efficiency"]) == 5
+    assert representative_items[0].entry["run_name"] not in {item.entry["run_name"] for item in items_after_one_shared_exists}

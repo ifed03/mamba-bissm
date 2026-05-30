@@ -120,6 +120,8 @@ SUMMARY_FIELDS = (
     "inference_latency_ms_per_window",
     "throughput_records_per_second",
     "throughput_windows_per_second",
+    "efficiency_profile_key",
+    "efficiency_profile_source_run_name",
     "efficiency_file_path",
     "log_file_path",
     "return_code",
@@ -232,6 +234,67 @@ def run_name(spec: ModelSpec, dimensions: str, noise_type: str, snr_db: float) -
     return f"{spec.key}_{dimensions}_{noise_type}_{_run_snr_token(snr_db)}"
 
 
+def _format_seconds_token(value: Any) -> str:
+    try:
+        raw = f"{float(value):g}"
+    except (TypeError, ValueError):
+        raw = str(value)
+    return raw.replace(".", "p")
+
+
+def _safe_key_part(value: Any) -> str:
+    text = str(value).strip().lower() or "unknown"
+    allowed = []
+    for char in text:
+        if char.isalnum() or char in {"-", "_", "."}:
+            allowed.append(char)
+        else:
+            allowed.append("_")
+    return "".join(allowed).strip("_") or "unknown"
+
+
+def efficiency_profile_fields(
+    *,
+    entry: dict[str, Any],
+    cfg: dict[str, Any],
+    config_path: str,
+    timing_device: str = "cpu",
+    precision: str = "fp32",
+) -> dict[str, Any]:
+    preprocessing = cfg.get("preprocessing", {}) or {}
+    windowing = preprocessing.get("windowing", {}) or {}
+    fs_target = preprocessing.get("fs_target", entry.get("ecg_fs", 100))
+    window_seconds = windowing.get("window_seconds", preprocessing.get("target_seconds", "unknown"))
+    stride_seconds = windowing.get("stride_seconds", window_seconds)
+    try:
+        input_length_samples: Any = int(round(float(fs_target) * float(window_seconds)))
+    except (TypeError, ValueError):
+        input_length_samples = "unknown"
+    architecture_id = Path(config_path).stem
+    profile_key = "__".join(
+        [
+            f"model-{_safe_key_part(entry.get('model_family'))}",
+            f"backbone-{_safe_key_part(entry.get('backbone'))}",
+            f"dims-{_safe_key_part(entry.get('dimensions'))}",
+            f"arch-{_safe_key_part(architecture_id)}",
+            f"input-{_safe_key_part(input_length_samples)}",
+            f"win-{_format_seconds_token(window_seconds)}s",
+            f"stride-{_format_seconds_token(stride_seconds)}s",
+            f"device-{_safe_key_part(timing_device)}",
+            f"precision-{_safe_key_part(precision)}",
+        ]
+    )
+    return {
+        "efficiency_architecture_id": architecture_id,
+        "input_length_samples": input_length_samples,
+        "window_seconds": window_seconds,
+        "stride_seconds": stride_seconds,
+        "timing_device": timing_device,
+        "precision": precision,
+        "efficiency_profile_key": profile_key,
+    }
+
+
 def selected_specs(model_keys: list[str] | None, *, smoke: bool) -> list[ModelSpec]:
     keys = model_keys or [spec.key for spec in MODEL_SPECS]
     lookup = {spec.key: spec for spec in MODEL_SPECS}
@@ -296,26 +359,26 @@ def build_manifest(
                     "--output-root",
                     str(output_root),
                 ]
-                entries.append(
-                    {
-                        "run_name": name,
-                        "model_family": spec.model_family,
-                        "backbone": spec.backbone,
-                        "config_path": cfg_rel,
-                        "dimensions": dimensions,
-                        "noise_type": noise_type,
-                        "snr_db": float(snr),
-                        "output_dir": str(out_dir),
-                        "command": command,
-                        "command_str": " ".join(command),
-                        "seed": int(seed),
-                        "ecg_fs": float(ecg_fs),
-                        "expected_metrics_file": str(out_dir / noisy_input_metrics_filename(noise_type, snr)),
-                        "expected_threshold_file": str(out_dir / noisy_input_threshold_filename(noise_type, snr)),
-                        "expected_checkpoint_file": str(out_dir / "checkpoints" / "best.ckpt"),
-                        "status": "planned" if cfg_exists else "missing_config",
-                    }
-                )
+                entry = {
+                    "run_name": name,
+                    "model_family": spec.model_family,
+                    "backbone": spec.backbone,
+                    "config_path": cfg_rel,
+                    "dimensions": dimensions,
+                    "noise_type": noise_type,
+                    "snr_db": float(snr),
+                    "output_dir": str(out_dir),
+                    "command": command,
+                    "command_str": " ".join(command),
+                    "seed": int(seed),
+                    "ecg_fs": float(ecg_fs),
+                    "expected_metrics_file": str(out_dir / noisy_input_metrics_filename(noise_type, snr)),
+                    "expected_threshold_file": str(out_dir / noisy_input_threshold_filename(noise_type, snr)),
+                    "expected_checkpoint_file": str(out_dir / "checkpoints" / "best.ckpt"),
+                    "status": "planned" if cfg_exists else "missing_config",
+                }
+                entry.update(efficiency_profile_fields(entry=entry, cfg=cfg, config_path=cfg_rel))
+                entries.append(entry)
 
     return {
         "protocol": "noisy-input-training",
@@ -404,6 +467,57 @@ def mark_resume_statuses(manifest: dict[str, Any]) -> None:
             entry["status"] = "completed"
 
 
+def shared_efficiency_dir(output_root: Path, profile_key: str) -> Path:
+    return output_root / "efficiency_profiles" / _safe_key_part(profile_key)
+
+
+def _profile_representative_score(indexed_entry: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
+    index, entry = indexed_entry
+    return (
+        0 if float(entry.get("snr_db", 9999)) == 18.0 else 1,
+        0 if entry.get("noise_type") == "bw" else 1,
+        index,
+    )
+
+
+def assign_efficiency_profile_sources(
+    manifest: dict[str, Any],
+    output_root: Path,
+    *,
+    per_condition: bool = False,
+) -> None:
+    if per_condition:
+        for entry in manifest["entries"]:
+            profile_key = entry.get("efficiency_profile_key", "")
+            entry["efficiency_profile_source_run_name"] = entry["run_name"]
+            entry["efficiency_profile_file"] = str(Path(entry["output_dir"]) / "efficiency.json")
+            entry["efficiency_profile_key"] = profile_key
+        return
+
+    groups: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, entry in enumerate(manifest["entries"]):
+        profile_key = entry.get("efficiency_profile_key")
+        if profile_key:
+            groups.setdefault(str(profile_key), []).append((index, entry))
+
+    for profile_key, indexed_entries in groups.items():
+        completed = [(index, entry) for index, entry in indexed_entries if _entry_complete(entry)]
+        source_entry = min(completed, key=_profile_representative_score)[1] if completed else None
+        profile_file = shared_efficiency_dir(output_root, profile_key) / "efficiency.json"
+        for _, entry in indexed_entries:
+            entry["efficiency_profile_file"] = str(profile_file)
+            entry["efficiency_profile_source_run_name"] = source_entry["run_name"] if source_entry else ""
+
+
+def _shared_efficiency_complete(entry: dict[str, Any]) -> bool:
+    profile_file = entry.get("efficiency_profile_file")
+    return bool(profile_file) and Path(profile_file).is_file()
+
+
+def _is_efficiency_representative(entry: dict[str, Any]) -> bool:
+    return entry.get("efficiency_profile_source_run_name") == entry.get("run_name")
+
+
 def _lock_path(entry: dict[str, Any]) -> Path:
     return Path(entry["output_dir"]) / LOCK_NAME
 
@@ -450,8 +564,8 @@ def parse_summary_row(entry: dict[str, Any]) -> dict[str, Any]:
     metrics_path = Path(entry["expected_metrics_file"])
     threshold_path = Path(entry["expected_threshold_file"])
     run_dir = Path(entry["output_dir"])
-    efficiency_path = run_dir / "efficiency.json"
-    record_latency_path = run_dir / "efficiency_record_latency.csv"
+    efficiency_path = Path(entry.get("efficiency_profile_file") or (run_dir / "efficiency.json"))
+    record_latency_path = efficiency_path.parent / "efficiency_record_latency.csv"
     row = {
         "run_name": entry["run_name"],
         "model_family": entry["model_family"],
@@ -462,6 +576,8 @@ def parse_summary_row(entry: dict[str, Any]) -> dict[str, Any]:
         "metrics_file_path": str(metrics_path),
         "threshold_file_path": str(threshold_path),
         "checkpoint_path": entry.get("expected_checkpoint_file", ""),
+        "efficiency_profile_key": entry.get("efficiency_profile_key", ""),
+        "efficiency_profile_source_run_name": entry.get("efficiency_profile_source_run_name", ""),
         "efficiency_file_path": str(efficiency_path) if efficiency_path.is_file() else "",
         "log_file_path": entry.get("log_file_path", ""),
         "return_code": entry.get("return_code", ""),
@@ -570,6 +686,7 @@ def efficiency_command(
     repeats: int,
     throughput_batch_size: int,
     max_records: int | None,
+    output_dir: Path | None = None,
 ) -> list[str]:
     run_dir = Path(entry["output_dir"])
     cmd = [
@@ -590,6 +707,8 @@ def efficiency_command(
     ]
     if max_records is not None:
         cmd.extend(["--max-records", str(max_records)])
+    if output_dir is not None:
+        cmd.extend(["--output-dir", str(output_dir)])
     return cmd
 
 
@@ -603,9 +722,11 @@ def profile_entry_efficiency(
     max_records: int | None,
     overwrite: bool,
     log_file: Path | None = None,
+    output_dir: Path | None = None,
 ) -> None:
     run_dir = Path(entry["output_dir"])
-    efficiency_path = run_dir / "efficiency.json"
+    target_dir = output_dir or run_dir
+    efficiency_path = target_dir / "efficiency.json"
     if efficiency_path.is_file() and not overwrite:
         print(f"Efficiency exists, skipping: {efficiency_path}")
         return
@@ -620,11 +741,13 @@ def profile_entry_efficiency(
         repeats=repeats,
         throughput_batch_size=throughput_batch_size,
         max_records=max_records,
+        output_dir=output_dir,
     )
-    print(f"Profiling CPU efficiency: {run_dir}")
+    print(f"Profiling CPU efficiency: source={run_dir} output={target_dir}", flush=True)
     if log_file is None:
         subprocess.run(cmd, cwd=repo_root, check=True)
         return
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     with log_file.open("a") as f:
@@ -640,16 +763,27 @@ def build_work_items(
     *,
     profile_efficiency: bool = False,
     overwrite_efficiency: bool = False,
+    profile_efficiency_per_condition: bool = False,
 ) -> list[WorkItem]:
+    if profile_efficiency and not profile_efficiency_per_condition:
+        assign_efficiency_profile_sources(manifest, Path(str(manifest.get("output_root", "."))))
     items: list[WorkItem] = []
+    scheduled_profile_keys: set[str] = set()
     for entry in manifest["entries"]:
         if entry.get("status") not in {"planned", "completed"}:
             continue
         complete = _entry_complete(entry)
         if complete:
             entry["status"] = "completed"
-            if profile_efficiency and (overwrite_efficiency or not _efficiency_complete(entry)):
-                items.append(WorkItem("profile_efficiency", entry))
+            if profile_efficiency:
+                if profile_efficiency_per_condition:
+                    if overwrite_efficiency or not _efficiency_complete(entry):
+                        items.append(WorkItem("profile_efficiency", entry))
+                elif _is_efficiency_representative(entry):
+                    profile_key = str(entry.get("efficiency_profile_key", entry["run_name"]))
+                    if profile_key not in scheduled_profile_keys and (overwrite_efficiency or not _shared_efficiency_complete(entry)):
+                        items.append(WorkItem("profile_efficiency", entry))
+                        scheduled_profile_keys.add(profile_key)
             continue
         if entry.get("status") == "planned":
             items.append(WorkItem("train_condition", entry))
@@ -678,10 +812,14 @@ def _run_work_item(
     efficiency_max_records: int | None,
     overwrite_efficiency: bool,
     stale_lock_minutes: float | None,
+    profile_efficiency_per_condition: bool = False,
 ) -> WorkResult:
     entry = item.entry
     run_dir = Path(entry["output_dir"])
-    log_path = run_dir / ("efficiency.log" if item.kind == "profile_efficiency" else "run.log")
+    profile_output_dir = None
+    if item.kind == "profile_efficiency" and not profile_efficiency_per_condition and entry.get("efficiency_profile_file"):
+        profile_output_dir = Path(entry["efficiency_profile_file"]).parent
+    log_path = (profile_output_dir or run_dir) / ("efficiency.log" if item.kind == "profile_efficiency" else "run.log")
     lock_path = acquire_run_lock(entry, stale_lock_minutes=stale_lock_minutes)
     if lock_path is None:
         return WorkResult(
@@ -703,6 +841,7 @@ def _run_work_item(
                     max_records=efficiency_max_records,
                     overwrite=overwrite_efficiency,
                     log_file=log_path,
+                    output_dir=profile_output_dir,
                 )
             except subprocess.CalledProcessError as exc:
                 return WorkResult(
@@ -725,7 +864,7 @@ def _run_work_item(
                 log_file=str(log_path),
                 error_message=f"Training command failed with return code {return_code}",
             )
-        if profile_efficiency:
+        if profile_efficiency and profile_efficiency_per_condition:
             try:
                 profile_entry_efficiency(
                     entry,
@@ -771,12 +910,13 @@ def run_manifest(
     fail_fast: bool = False,
     keep_going: bool = False,
     profile_efficiency: bool = False,
-    efficiency_warmup: int = 20,
-    efficiency_repeats: int = 100,
+    efficiency_warmup: int = 5,
+    efficiency_repeats: int = 10,
     efficiency_throughput_batch_size: int = 16,
     efficiency_max_records: int | None = None,
     overwrite_efficiency: bool = False,
     stale_lock_minutes: float | None = None,
+    profile_efficiency_per_condition: bool = False,
 ) -> None:
     if keep_going:
         fail_fast = False
@@ -785,6 +925,7 @@ def run_manifest(
         manifest,
         profile_efficiency=profile_efficiency,
         overwrite_efficiency=overwrite_efficiency,
+        profile_efficiency_per_condition=profile_efficiency_per_condition,
     )
     total = len(manifest["entries"])
     status_counts = {status: sum(1 for e in manifest["entries"] if e.get("status") == status) for status in {"planned", "completed", "failed", "locked", "profiled", "missing_config"}}
@@ -817,6 +958,7 @@ def run_manifest(
                 efficiency_max_records=efficiency_max_records,
                 overwrite_efficiency=overwrite_efficiency,
                 stale_lock_minutes=stale_lock_minutes,
+                profile_efficiency_per_condition=profile_efficiency_per_condition,
             )
             apply_result_to_entry(result, entry)
             completed += result.status in {"completed", "profiled"}
@@ -847,6 +989,7 @@ def run_manifest(
                 efficiency_max_records=efficiency_max_records,
                 overwrite_efficiency=overwrite_efficiency,
                 stale_lock_minutes=stale_lock_minutes,
+                profile_efficiency_per_condition=profile_efficiency_per_condition,
             )
             future_to_item[future] = item
             running += 1
@@ -901,9 +1044,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--jobs", type=int, default=1, help="Maximum independent conditions to run concurrently.")
     p.add_argument("--stale-lock-minutes", type=float, default=None)
     p.add_argument("--profile-efficiency", action="store_true")
+    p.add_argument("--profile-efficiency-per-condition", action="store_true", help="Profile every noisy condition instead of one representative per model config.")
     p.add_argument("--overwrite-efficiency", action="store_true")
-    p.add_argument("--efficiency-warmup", type=int, default=20)
-    p.add_argument("--efficiency-repeats", type=int, default=100)
+    p.add_argument("--efficiency-warmup", type=int, default=5)
+    p.add_argument("--efficiency-repeats", type=int, default=10)
     p.add_argument("--efficiency-throughput-batch-size", type=int, default=16)
     p.add_argument("--efficiency-max-records", type=int, default=None)
     args = p.parse_args()
@@ -933,6 +1077,11 @@ def main() -> None:
     )
     if args.resume:
         mark_resume_statuses(manifest)
+    assign_efficiency_profile_sources(
+        manifest,
+        output_root,
+        per_condition=args.profile_efficiency_per_condition,
+    )
     write_manifest(manifest, manifest_path)
     print(f"Wrote noisy-input sweep manifest: {manifest_path}")
     print(f"Planned runs: {len(manifest['entries'])}")
@@ -950,6 +1099,20 @@ def main() -> None:
         )
 
     if args.dry_run:
+        dry_items = build_work_items(
+            manifest,
+            profile_efficiency=args.profile_efficiency,
+            overwrite_efficiency=args.overwrite_efficiency,
+            profile_efficiency_per_condition=args.profile_efficiency_per_condition,
+        )
+        dry_train = sum(1 for item in dry_items if item.kind == "train_condition")
+        dry_profiles = sum(1 for item in dry_items if item.kind == "profile_efficiency")
+        mode = "per-condition" if args.profile_efficiency_per_condition else "shared-profile"
+        print(
+            "DRY-RUN work summary: "
+            f"train={dry_train}, efficiency_profiles={dry_profiles}, "
+            f"efficiency_mode={mode}, warmup={args.efficiency_warmup}, repeats={args.efficiency_repeats}"
+        )
         print("DRY-RUN complete: manifest written, no training launched.")
         return
 
@@ -967,8 +1130,14 @@ def main() -> None:
             efficiency_max_records=args.efficiency_max_records,
             overwrite_efficiency=args.overwrite_efficiency,
             stale_lock_minutes=args.stale_lock_minutes,
+            profile_efficiency_per_condition=args.profile_efficiency_per_condition,
         )
     finally:
+        assign_efficiency_profile_sources(
+            manifest,
+            output_root,
+            per_condition=args.profile_efficiency_per_condition,
+        )
         write_manifest(manifest, manifest_path)
         rows = collect_summary(manifest, output_root)
         print(f"Wrote summary: {output_root / 'summary.csv'} ({len(rows)} row(s))")

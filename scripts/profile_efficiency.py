@@ -25,6 +25,7 @@ if __name__ == "__main__":
     p.add_argument("--repeats", type=int, default=100)
     p.add_argument("--throughput-batch-size", type=int, default=16)
     p.add_argument("--max-records", type=int, default=None)
+    p.add_argument("--output-dir", default=None)
     args = p.parse_args()
 
     from data.datamodule import make_dataloaders
@@ -87,7 +88,8 @@ if __name__ == "__main__":
     num_profiled_records = len(record_rows)
     num_profiled_windows = int(sum(r["num_windows"] for r in record_rows))
 
-    run_dir = _run_dir_from_ckpt(args.ckpt)
+    run_dir = Path(args.output_dir) if args.output_dir else _run_dir_from_ckpt(args.ckpt)
+    run_dir.mkdir(parents=True, exist_ok=True)
     wps16 = float(args.throughput_batch_size / (sum(t16) / len(t16) / 1000.0))
     metadata = efficiency_metadata_from_config(cfg, x_ref)
     payload = {
