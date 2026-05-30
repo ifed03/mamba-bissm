@@ -469,6 +469,7 @@ def train_model(model, train_loader, val_loader, test_loader, cfg, run_dir: Path
         run_dir / "lr_history.csv", index=False
     )
     out = {
+        "run_name": str(run_dir.name),
         "best_epoch": best_epoch,
         "best_val_metric_name": best_metric_name,
         "best_val_metric": float(best_metric),

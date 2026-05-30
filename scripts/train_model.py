@@ -215,9 +215,10 @@ def main():
                 run_name = args.run_name or noisy_input_condition_name(condition)
                 if args.run_name and (len(args.noise_types) > 1 or len(args.snr_db) > 1):
                     run_name = f"{args.run_name}__{noisy_input_condition_name(condition)}"
+                run_cfg["run_name"] = run_name
                 run_dir = make_run_dir(str(output_root), run_name, cfg)
                 save_config(run_dir / "config_resolved.yaml", run_cfg)
-                metrics = train_model(model, train_loader, val_loader, test_loader, cfg, run_dir)
+                metrics = train_model(model, train_loader, val_loader, test_loader, run_cfg, run_dir)
                 metrics_by_condition[condition_key(condition)] = metrics
                 print(
                     "Condition summary: "
@@ -225,7 +226,18 @@ def main():
                     f"tau*={metrics['threshold']}, checkpoint={run_dir / 'checkpoints' / 'best.ckpt'}"
                 )
         print(f"Noisy-input training/evaluation complete for {len(metrics_by_condition)} condition(s).")
-        print(metrics_by_condition)
+        compact = {
+            key: {
+                "run_name": value.get("run_name"),
+                "best_epoch": value.get("best_epoch"),
+                "best_val_metric_name": value.get("best_val_metric_name"),
+                "best_val_metric": value.get("best_val_metric"),
+                "threshold": value.get("threshold"),
+                "test": value.get("test"),
+            }
+            for key, value in metrics_by_condition.items()
+        }
+        print(compact)
         return
 
     if args.dry_run:
@@ -248,8 +260,11 @@ def main():
     train_loader, val_loader, test_loader = make_dataloaders(cfg, split)
     model = build_model(cfg)
     run_dir = make_run_dir(args.output_root or cfg["paths"]["runs_dir"], args.run_name, cfg)
-    save_config(run_dir / "config_resolved.yaml", cfg)
-    metrics = train_model(model, train_loader, val_loader, test_loader, cfg, run_dir)
+    run_cfg = dict(cfg)
+    if args.run_name:
+        run_cfg["run_name"] = args.run_name
+    save_config(run_dir / "config_resolved.yaml", run_cfg)
+    metrics = train_model(model, train_loader, val_loader, test_loader, run_cfg, run_dir)
     print(metrics)
 
 

@@ -43,13 +43,29 @@ if __name__ == "__main__":
     from utils.config import load_config
 
     cfg = load_config(args.config)
+    device = torch.device(args.device)
+    fast_path_overridden_for_cpu = False
+    if device.type == "cpu":
+        model_cfg = cfg.get("model", {}) or {}
+        backbone = str(model_cfg.get("backbone", model_cfg.get("name", ""))).lower()
+        if backbone in {"mamba", "bimamba"}:
+            if model_cfg.get("use_fast_path", True):
+                model_cfg["use_fast_path"] = False
+                fast_path_overridden_for_cpu = True
+            try:
+                import mamba_ssm.modules.mamba_simple as mamba_simple
+                from mamba_ssm.ops.selective_scan_interface import selective_scan_ref
+
+                mamba_simple.causal_conv1d_fn = None
+                mamba_simple.selective_scan_fn = selective_scan_ref
+            except Exception as exc:
+                print(f"Warning: could not force Mamba CPU reference kernels: {exc}")
     split_path = args.split or str(Path(cfg["paths"]["splits_dir"]) / f"holdout_seed{cfg['split']['seed']}" / "split.json")
     split = load_split(split_path)
     _, test_loader_for_window, test_loader = make_dataloaders(cfg, split)
 
     model = build_model(cfg)
     load_checkpoint(args.ckpt, model)
-    device = torch.device(args.device)
     model.to(device=device, dtype=torch.float32)
     model.eval()
 
@@ -68,6 +84,8 @@ if __name__ == "__main__":
 
     record_rows = profile_record_latency(model, test_loader, device, args.max_records)
     record_lat = [r["latency_ms"] for r in record_rows]
+    num_profiled_records = len(record_rows)
+    num_profiled_windows = int(sum(r["num_windows"] for r in record_rows))
 
     run_dir = _run_dir_from_ckpt(args.ckpt)
     wps16 = float(args.throughput_batch_size / (sum(t16) / len(t16) / 1000.0))
@@ -79,10 +97,21 @@ if __name__ == "__main__":
         "backbone": cfg.get("model", {}).get("backbone"),
         **metadata,
         "timing_device": str(device),
+        "device": str(device),
+        "timing_scope": "model_forward_sigmoid_max_only_excludes_loader_tensor_transfer_io",
+        "cpu_fast_path_override": fast_path_overridden_for_cpu,
         "precision": "fp32",
         "warmup_iterations": args.warmup,
+        "num_warmup_batches": args.warmup,
+        "warmup_passes": args.warmup,
         "measured_repeats": args.repeats,
+        "timed_window_passes": args.repeats,
+        "timed_passes": args.repeats,
+        "timed_batches": num_profiled_records,
+        "num_records": num_profiled_records,
+        "num_windows": num_profiled_windows,
         "latency_batch_size": 1,
+        "batch_size": 1,
         "throughput_batch_size": args.throughput_batch_size,
         "total_parameters": total_params,
         "trainable_parameters": trainable_params,

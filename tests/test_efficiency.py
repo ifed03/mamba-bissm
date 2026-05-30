@@ -123,7 +123,9 @@ from evaluate.efficiency import write_efficiency_outputs
 def test_output_schema_keys(tmp_path: Path):
     required = {
         "config_path","checkpoint_path","model_name","window_seconds","stride_seconds","input_length_samples","timing_device",
-        "precision","warmup_iterations","measured_repeats","latency_batch_size","throughput_batch_size",
+        "precision","warmup_iterations","num_warmup_batches","warmup_passes","measured_repeats",
+        "timed_window_passes","timed_passes","timed_batches","num_records","num_windows",
+        "latency_batch_size","batch_size","throughput_batch_size","timing_scope",
         "total_parameters","trainable_parameters","mean_window_latency_ms_batch1","std_window_latency_ms_batch1",
         "p50_window_latency_ms_batch1","p95_window_latency_ms_batch1","mean_window_latency_ms_batch16",
         "std_window_latency_ms_batch16","p50_window_latency_ms_batch16","p95_window_latency_ms_batch16",
@@ -131,7 +133,7 @@ def test_output_schema_keys(tmp_path: Path):
         "p95_record_latency_ms","records_per_second","window_input_source"
     }
     payload = {k: 1 for k in required}
-    payload.update({"backbone": None, "cpu_info": {}, "config_path": "a", "checkpoint_path": "b", "model_name": "m", "timing_device": "cpu", "precision": "fp32"})
+    payload.update({"backbone": None, "cpu_info": {}, "config_path": "a", "checkpoint_path": "b", "model_name": "m", "timing_device": "cpu", "device": "cpu", "precision": "fp32"})
     write_efficiency_outputs(tmp_path, payload, [{"batch_size":1,"repeat_idx":0,"latency_ms":1.0}], [{"record_id":"r","num_windows":1,"latency_ms":1.0}])
     data = json.loads((tmp_path / "efficiency.json").read_text())
     assert required.issubset(data.keys())
@@ -148,8 +150,8 @@ def test_cli_smoke_help():
 def test_window_latency_csv_has_batch_label(tmp_path: Path):
     payload = {
         "config_path": "a", "checkpoint_path": "b", "model_name": "m", "window_seconds": 10,
-        "stride_seconds": 2, "input_length_samples": 1000, "timing_device": "cpu", "precision": "fp32",
-        "warmup_iterations": 1, "measured_repeats": 1, "latency_batch_size": 1, "throughput_batch_size": 16,
+        "stride_seconds": 2, "input_length_samples": 1000, "timing_device": "cpu", "device": "cpu", "precision": "fp32",
+        "warmup_iterations": 1, "num_warmup_batches": 1, "warmup_passes": 1, "measured_repeats": 1, "timed_window_passes": 1, "timed_passes": 1, "timed_batches": 1, "num_records": 1, "num_windows": 1, "latency_batch_size": 1, "batch_size": 1, "throughput_batch_size": 16, "timing_scope": "model_forward_sigmoid_max_only_excludes_loader_tensor_transfer_io",
         "total_parameters": 1, "trainable_parameters": 1,
         "mean_window_latency_ms_batch1": 1.0, "std_window_latency_ms_batch1": 0.0, "p50_window_latency_ms_batch1": 1.0, "p95_window_latency_ms_batch1": 1.0,
         "mean_window_latency_ms_batch16": 1.0, "std_window_latency_ms_batch16": 0.0, "p50_window_latency_ms_batch16": 1.0, "p95_window_latency_ms_batch16": 1.0,
@@ -170,8 +172,8 @@ def test_window_latency_csv_has_batch_label(tmp_path: Path):
 def test_efficiency_json_includes_requested_fields(tmp_path: Path):
     payload = {
         "config_path": "a", "checkpoint_path": "b", "model_name": "m", "window_seconds": 10,
-        "stride_seconds": 2, "input_length_samples": 1000, "timing_device": "cpu", "precision": "fp32",
-        "warmup_iterations": 20, "measured_repeats": 100, "latency_batch_size": 1, "throughput_batch_size": 16,
+        "stride_seconds": 2, "input_length_samples": 1000, "timing_device": "cpu", "device": "cpu", "precision": "fp32",
+        "warmup_iterations": 20, "num_warmup_batches": 20, "warmup_passes": 20, "measured_repeats": 100, "timed_window_passes": 100, "timed_passes": 100, "timed_batches": 1, "num_records": 1, "num_windows": 3, "latency_batch_size": 1, "batch_size": 1, "throughput_batch_size": 16, "timing_scope": "model_forward_sigmoid_max_only_excludes_loader_tensor_transfer_io",
         "total_parameters": 100, "trainable_parameters": 100,
         "mean_window_latency_ms_batch1": 1.0, "std_window_latency_ms_batch1": 0.1,
         "p50_window_latency_ms_batch1": 1.0, "p95_window_latency_ms_batch1": 1.2,
@@ -204,7 +206,13 @@ def test_efficiency_json_includes_requested_fields(tmp_path: Path):
         "total_parameters",
         "trainable_parameters",
         "timing_device",
+        "device",
         "precision",
+        "timing_scope",
+        "num_records",
+        "num_windows",
+        "num_warmup_batches",
+        "timed_batches",
         "window_input_source",
     }
     assert required_exact.issubset(data.keys())
