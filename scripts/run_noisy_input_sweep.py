@@ -625,9 +625,12 @@ def profile_entry_efficiency(
     if log_file is None:
         subprocess.run(cmd, cwd=repo_root, check=True)
         return
+    env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     with log_file.open("a") as f:
         f.write(f"\n$ {' '.join(cmd)}\n")
-        result = subprocess.run(cmd, cwd=repo_root, stdout=f, stderr=subprocess.STDOUT)
+        f.flush()
+        result = subprocess.run(cmd, cwd=repo_root, stdout=f, stderr=subprocess.STDOUT, env=env)
     if result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, cmd)
 
@@ -655,10 +658,12 @@ def build_work_items(
 
 def _run_subprocess_to_log(cmd: list[str], *, cwd: Path, log_path: Path) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     with log_path.open("a") as f:
         f.write(f"\n$ {' '.join(cmd)}\n")
         f.flush()
-        result = subprocess.run(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT)
+        result = subprocess.run(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, env=env)
     return int(result.returncode)
 
 
@@ -782,6 +787,15 @@ def run_manifest(
         overwrite_efficiency=overwrite_efficiency,
     )
     total = len(manifest["entries"])
+    status_counts = {status: sum(1 for e in manifest["entries"] if e.get("status") == status) for status in {"planned", "completed", "failed", "locked", "profiled", "missing_config"}}
+    train_items = sum(1 for item in items if item.kind == "train_condition")
+    profile_items = sum(1 for item in items if item.kind == "profile_efficiency")
+    skipped_completed = status_counts.get("completed", 0) - profile_items
+    print(
+        "Resume/work summary: "
+        f"completed_skip={max(skipped_completed, 0)}, train={train_items}, "
+        f"profile={profile_items}, other_statuses={status_counts}"
+    )
     if not items:
         print(f"No runnable work items. completed={sum(1 for e in manifest['entries'] if e.get('status') == 'completed')} total={total}")
         return
@@ -836,7 +850,7 @@ def run_manifest(
             )
             future_to_item[future] = item
             running += 1
-            print(f"START {item.kind} {item.entry['run_name']} running={min(running, jobs)}")
+            print(f"QUEUE {item.kind} {item.entry['run_name']} queued={running}/{len(items)} max_jobs={jobs}")
 
         first_failure: subprocess.CalledProcessError | None = None
         for future in as_completed(future_to_item):
@@ -923,7 +937,12 @@ def main() -> None:
     print(f"Wrote noisy-input sweep manifest: {manifest_path}")
     print(f"Planned runs: {len(manifest['entries'])}")
     validate_manifest(manifest, repo_root=repo_root, overwrite=args.overwrite, resume=args.resume)
+    status_counts = {status: sum(1 for e in manifest["entries"] if e.get("status") == status) for status in {"planned", "completed", "failed", "locked", "profiled", "missing_config"}}
+    print(f"Manifest status summary: {status_counts}")
+    verbose_preflight = args.dry_run and not args.resume
     for entry in manifest["entries"]:
+        if not verbose_preflight and entry.get("status") != "planned":
+            continue
         command = entry["command"]
         print(
             f"Preflight ok: {entry['run_name']} -> one condition "
