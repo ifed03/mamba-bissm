@@ -12,7 +12,20 @@ import yaml
 
 
 WINDOWS = (4, 6, 8, 10)
-GENERATED_CONFIG_DIR = Path("configs/generated_clean_backbone_finish")
+CONFIG_SEARCH_DIRS = ("final_configs", "configs")
+GENERATED_CONFIG_DIR = Path("final_configs/generated_clean_backbone_finish")
+
+
+def _config_path(filename: str) -> str:
+    for root in CONFIG_SEARCH_DIRS:
+        candidate = Path(root) / filename
+        if candidate.exists():
+            return str(candidate)
+    return str(Path("configs") / filename)
+
+
+def _config_path_obj(filename: str) -> Path:
+    return Path(_config_path(filename))
 
 
 def mamba_backbone_configs() -> list[str]:
@@ -46,12 +59,12 @@ def ecgmamba_bilstm_backbone_configs() -> list[str]:
 
 
 def standalone_bilstm_configs() -> list[str]:
-    return [f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml" for w in WINDOWS]
+    return [_config_path(f"binary_bilstm_100hz_win{w}s_stride2s.yaml") for w in WINDOWS]
 
 
 def standalone_cnn1d_configs() -> list[str]:
     return [
-        f"configs/binary_cnn1d_c256_n3_k7_100hz_win{w}s_stride2s.yaml"
+        _config_path(f"binary_cnn1d_c256_n3_k7_100hz_win{w}s_stride2s.yaml")
         for w in WINDOWS
     ]
 
@@ -82,11 +95,11 @@ def _write_yaml(path: Path, cfg: dict) -> None:
 
 
 def _mamba_template_path(window_seconds: int) -> Path:
-    return Path(f"configs/binary_mamba_d64_n4_s16_100hz_win{window_seconds}s_stride2s.yaml")
+    return _config_path_obj(f"binary_mamba_d64_n4_s16_100hz_win{window_seconds}s_stride2s.yaml")
 
 
 def _ecgmamba_bilstm_template_path(window_seconds: int) -> Path:
-    return Path(f"configs/binary_ecgmamba_bilstm_d64_n2_100hz_win{window_seconds}s_stride2s.yaml")
+    return _config_path_obj(f"binary_ecgmamba_bilstm_d64_n2_100hz_win{window_seconds}s_stride2s.yaml")
 
 
 def prepare_generated_configs() -> None:

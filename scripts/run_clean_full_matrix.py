@@ -10,19 +10,28 @@ from pathlib import Path
 
 
 WINDOWS = (4, 6, 8, 10)
+CONFIG_SEARCH_DIRS = ("final_configs", "configs")
+
+
+def _config_path(filename: str) -> str:
+    for root in CONFIG_SEARCH_DIRS:
+        candidate = Path(root) / filename
+        if candidate.exists():
+            return str(candidate)
+    return str(Path("configs") / filename)
 
 
 def controlled_ecgmamba_backbone_configs() -> list[str]:
     """Configs for the controlled ECGMamba backbone comparison."""
     configs: list[str] = []
     for w in WINDOWS:
-        configs.append(f"configs/binary_bissm_d64_n2_s64_100hz_win{w}s_stride2s.yaml")
+        configs.append(_config_path(f"binary_bissm_d64_n2_s64_100hz_win{w}s_stride2s.yaml"))
     for w in WINDOWS:
-        configs.append(f"configs/binary_mamba_d64_n2_s16_100hz_win{w}s_stride2s.yaml")
+        configs.append(_config_path(f"binary_mamba_d64_n2_s16_100hz_win{w}s_stride2s.yaml"))
     for w in WINDOWS:
-        configs.append(f"configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win{w}s_stride2s.yaml")
+        configs.append(_config_path(f"binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win{w}s_stride2s.yaml"))
     for w in WINDOWS:
-        configs.append(f"configs/binary_ecgmamba_bilstm_d64_n2_100hz_win{w}s_stride2s.yaml")
+        configs.append(_config_path(f"binary_ecgmamba_bilstm_d64_n2_100hz_win{w}s_stride2s.yaml"))
     return configs
 
 
@@ -30,9 +39,9 @@ def depth_sweep_configs() -> list[str]:
     """Additional depth-sweep configs, separate from the controlled comparison."""
     configs: list[str] = []
     for w in WINDOWS:
-        configs.append(f"configs/binary_bissm_d64_n4_s64_100hz_win{w}s_stride2s.yaml")
+        configs.append(_config_path(f"binary_bissm_d64_n4_s64_100hz_win{w}s_stride2s.yaml"))
     for w in WINDOWS:
-        configs.append(f"configs/binary_mamba_d64_n4_s16_100hz_win{w}s_stride2s.yaml")
+        configs.append(_config_path(f"binary_mamba_d64_n4_s16_100hz_win{w}s_stride2s.yaml"))
     return configs
 
 
@@ -40,9 +49,9 @@ def external_baseline_configs() -> list[str]:
     """Standalone baseline configs kept separate from backbone comparisons."""
     configs: list[str] = []
     for w in WINDOWS:
-        configs.append(f"configs/binary_bilstm_100hz_win{w}s_stride2s.yaml")
+        configs.append(_config_path(f"binary_bilstm_100hz_win{w}s_stride2s.yaml"))
     for w in WINDOWS:
-        configs.append(f"configs/binary_cnn1d_c256_n3_k7_100hz_win{w}s_stride2s.yaml")
+        configs.append(_config_path(f"binary_cnn1d_c256_n3_k7_100hz_win{w}s_stride2s.yaml"))
     return configs
 
 
