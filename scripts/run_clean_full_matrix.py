@@ -18,6 +18,10 @@ def _config_path(filename: str) -> str:
         candidate = Path(root) / filename
         if candidate.exists():
             return str(candidate)
+
+        matches = sorted(Path(root).rglob(filename))
+        if len(matches) == 1:
+            return str(matches[0])
     return str(Path("configs") / filename)
 
 
@@ -29,9 +33,9 @@ def controlled_ecgmamba_backbone_configs() -> list[str]:
     for w in WINDOWS:
         configs.append(_config_path(f"binary_mamba_d64_n2_s16_100hz_win{w}s_stride2s.yaml"))
     for w in WINDOWS:
-        configs.append(_config_path(f"binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win{w}s_stride2s.yaml"))
+        configs.append(_config_path(f"binary_bimamba_d128_n2_s64_slowpath_fp32_lr1e-3_100hz_win{w}s_stride2s.yaml"))
     for w in WINDOWS:
-        configs.append(_config_path(f"binary_ecgmamba_bilstm_d64_n2_100hz_win{w}s_stride2s.yaml"))
+        configs.append(_config_path(f"binary_ecgmamba_bilstm_d128_h64_n2_fp32_100hz_win{w}s_stride2s.yaml"))
     return configs
 
 

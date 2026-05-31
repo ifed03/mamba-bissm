@@ -12,7 +12,7 @@ def test_bimamba_training_smoke_one_epoch(tmp_path: Path):
     pytest.importorskip("mamba_ssm")
 
     repo_root = Path(__file__).resolve().parents[1]
-    src = repo_root / "final_configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win4s_stride2s.yaml"
+    src = repo_root / "final_configs/bimamba_d128_n2_s64_lr1e-3/window_4s/binary_bimamba_d128_n2_s64_slowpath_fp32_lr1e-3_100hz_win4s_stride2s.yaml"
     cfg = yaml.safe_load(src.read_text())
 
     cfg["training"]["epochs"] = 1

@@ -56,7 +56,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         model_family="ecgmamba",
         backbone="mamba",
         config_path=(
-            "final_configs/generated_clean_backbone_finish/"
+            "final_configs/mamba_d128_n4_s64_lr1e-4/window_4s/"
             "binary_mamba_d128_n4_s64_slowpath_fp32_lr1e-4_100hz_win4s_stride2s.yaml"
         ),
         smoke_config_path="configs/smoke_ecgmamba_mamba_ssm_reduced_fp32_win4s_3epoch.yaml",
@@ -65,14 +65,17 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         key="ecgmamba_bimamba",
         model_family="ecgmamba",
         backbone="bimamba",
-        config_path="final_configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win4s_stride2s.yaml",
+        config_path=(
+            "final_configs/bimamba_d128_n2_s64_lr1e-3/window_4s/"
+            "binary_bimamba_d128_n2_s64_slowpath_fp32_lr1e-3_100hz_win4s_stride2s.yaml"
+        ),
     ),
     ModelSpec(
         key="ecgmamba_bilstm",
         model_family="ecgmamba",
         backbone="bilstm",
         config_path=(
-            "final_configs/generated_clean_backbone_finish/"
+            "final_configs/ecgmamba_bilstm_d128_n2_h64/window_4s/"
             "binary_ecgmamba_bilstm_d128_h64_n2_fp32_100hz_win4s_stride2s.yaml"
         ),
     ),
@@ -80,19 +83,28 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         key="ecgmamba_bissm",
         model_family="ecgmamba",
         backbone="bissm",
-        config_path="final_configs/binary_bissm_d64_n2_s32_100hz_win4s_stride2s.yaml",
+        config_path=(
+            "final_configs/bissm_d64_n2_s32/window_4s/"
+            "binary_bissm_d64_n2_s32_100hz_win4s_stride2s.yaml"
+        ),
     ),
     ModelSpec(
         key="cnn1d",
         model_family="cnn1d",
         backbone="baseline",
-        config_path="final_configs/binary_cnn1d_c256_n3_k7_100hz_win4s_stride2s.yaml",
+        config_path=(
+            "final_configs/cnn1d_c256_n3_k7/window_4s/"
+            "binary_cnn1d_c256_n3_k7_100hz_win4s_stride2s.yaml"
+        ),
     ),
     ModelSpec(
         key="bilstm",
         model_family="bilstm",
         backbone="baseline",
-        config_path="final_configs/binary_bilstm_100hz_win4s_stride2s.yaml",
+        config_path=(
+            "final_configs/bilstm_h128_n2_bi/window_4s/"
+            "binary_bilstm_100hz_win4s_stride2s.yaml"
+        ),
         smoke_config_path="configs/smoke_bilstm_win4s_3epoch.yaml",
     ),
 )

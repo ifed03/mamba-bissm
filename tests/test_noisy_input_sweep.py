@@ -127,12 +127,12 @@ def test_noisy_sweep_uses_clean_finish_sizes_for_mamba_and_ecgmamba_bilstm(tmp_p
     by_model = {entry["backbone"]: entry for entry in manifest["entries"]}
 
     assert by_model["mamba"]["config_path"] == (
-        "final_configs/generated_clean_backbone_finish/"
+        "final_configs/mamba_d128_n4_s64_lr1e-4/window_4s/"
         "binary_mamba_d128_n4_s64_slowpath_fp32_lr1e-4_100hz_win4s_stride2s.yaml"
     )
     assert by_model["mamba"]["dimensions"] == "d128_n4_s64"
     assert by_model["bilstm"]["config_path"] == (
-        "final_configs/generated_clean_backbone_finish/"
+        "final_configs/ecgmamba_bilstm_d128_n2_h64/window_4s/"
         "binary_ecgmamba_bilstm_d128_h64_n2_fp32_100hz_win4s_stride2s.yaml"
     )
     assert by_model["bilstm"]["dimensions"] == "d128_n2_h64"

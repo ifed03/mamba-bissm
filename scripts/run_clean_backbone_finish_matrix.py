@@ -21,6 +21,10 @@ def _config_path(filename: str) -> str:
         candidate = Path(root) / filename
         if candidate.exists():
             return str(candidate)
+
+        matches = sorted(Path(root).rglob(filename))
+        if len(matches) == 1:
+            return str(matches[0])
     return str(Path("configs") / filename)
 
 
