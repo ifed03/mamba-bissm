@@ -55,38 +55,44 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         key="ecgmamba_mamba",
         model_family="ecgmamba",
         backbone="mamba",
-        config_path="configs/binary_mamba_d64_n2_s16_100hz_win4s_stride2s.yaml",
+        config_path=(
+            "final_configs/generated_clean_backbone_finish/"
+            "binary_mamba_d128_n4_s64_slowpath_fp32_lr1e-4_100hz_win4s_stride2s.yaml"
+        ),
         smoke_config_path="configs/smoke_ecgmamba_mamba_ssm_reduced_fp32_win4s_3epoch.yaml",
     ),
     ModelSpec(
         key="ecgmamba_bimamba",
         model_family="ecgmamba",
         backbone="bimamba",
-        config_path="configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win4s_stride2s.yaml",
+        config_path="final_configs/binary_bimamba_d128_n2_s64_slowpath_fp32_100hz_win4s_stride2s.yaml",
     ),
     ModelSpec(
         key="ecgmamba_bilstm",
         model_family="ecgmamba",
         backbone="bilstm",
-        config_path="configs/binary_ecgmamba_bilstm_d64_n2_100hz_win4s_stride2s.yaml",
+        config_path=(
+            "final_configs/generated_clean_backbone_finish/"
+            "binary_ecgmamba_bilstm_d128_h64_n2_fp32_100hz_win4s_stride2s.yaml"
+        ),
     ),
     ModelSpec(
         key="ecgmamba_bissm",
         model_family="ecgmamba",
         backbone="bissm",
-        config_path="configs/binary_bissm_d64_n2_s32_100hz_win4s_stride2s.yaml",
+        config_path="final_configs/binary_bissm_d64_n2_s32_100hz_win4s_stride2s.yaml",
     ),
     ModelSpec(
         key="cnn1d",
         model_family="cnn1d",
         backbone="baseline",
-        config_path="configs/binary_cnn1d_c256_n3_k7_100hz_win4s_stride2s.yaml",
+        config_path="final_configs/binary_cnn1d_c256_n3_k7_100hz_win4s_stride2s.yaml",
     ),
     ModelSpec(
         key="bilstm",
         model_family="bilstm",
         backbone="baseline",
-        config_path="configs/binary_bilstm_100hz_win4s_stride2s.yaml",
+        config_path="final_configs/binary_bilstm_100hz_win4s_stride2s.yaml",
         smoke_config_path="configs/smoke_bilstm_win4s_3epoch.yaml",
     ),
 )
@@ -479,11 +485,25 @@ def validate_manifest(
 
 
 def _entry_complete(entry: dict[str, Any]) -> bool:
-    return (
-        Path(entry["expected_metrics_file"]).is_file()
-        and Path(entry["expected_threshold_file"]).is_file()
-        and Path(entry["expected_checkpoint_file"]).is_file()
-    )
+    metrics_path = Path(entry["expected_metrics_file"])
+    threshold_path = Path(entry["expected_threshold_file"])
+    checkpoint_path = Path(entry["expected_checkpoint_file"])
+    if not (metrics_path.is_file() and threshold_path.is_file() and checkpoint_path.is_file()):
+        return False
+    try:
+        metrics = json.loads(metrics_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    metadata = metrics.get("noise_metadata", {})
+    if not isinstance(metadata, dict):
+        return False
+    for split in ("train", "val", "test"):
+        split_metadata = metadata.get(split)
+        if not split_metadata:
+            return False
+        if not all(item.get("processing_order") == PROCESSING_ORDER for item in split_metadata):
+            return False
+    return True
 
 
 def _efficiency_complete(entry: dict[str, Any]) -> bool:

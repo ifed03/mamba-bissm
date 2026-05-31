@@ -117,6 +117,27 @@ def test_missing_config_files_are_reported_clearly(tmp_path):
         sweep.validate_manifest(manifest, repo_root=tmp_path)
 
 
+def test_noisy_sweep_uses_clean_finish_sizes_for_mamba_and_ecgmamba_bilstm(tmp_path):
+    manifest = _manifest(
+        tmp_path,
+        models=["ecgmamba_mamba", "ecgmamba_bilstm"],
+        noise_types=["bw"],
+        snr_db=[18.0],
+    )
+    by_model = {entry["backbone"]: entry for entry in manifest["entries"]}
+
+    assert by_model["mamba"]["config_path"] == (
+        "final_configs/generated_clean_backbone_finish/"
+        "binary_mamba_d128_n4_s64_slowpath_fp32_lr1e-4_100hz_win4s_stride2s.yaml"
+    )
+    assert by_model["mamba"]["dimensions"] == "d128_n4_s64"
+    assert by_model["bilstm"]["config_path"] == (
+        "final_configs/generated_clean_backbone_finish/"
+        "binary_ecgmamba_bilstm_d128_h64_n2_fp32_100hz_win4s_stride2s.yaml"
+    )
+    assert by_model["bilstm"]["dimensions"] == "d128_n2_h64"
+
+
 def test_manifest_contains_all_expected_fields(tmp_path):
     entry = _base_entry(tmp_path)
     expected = {
@@ -298,6 +319,23 @@ def test_completed_run_is_skipped_under_resume(tmp_path):
     sweep.mark_resume_statuses(manifest)
     assert entry["status"] == "completed"
     assert sweep.build_work_items(manifest) == []
+
+
+def test_resume_reruns_condition_when_noise_metadata_is_missing(tmp_path):
+    manifest = _manifest(tmp_path, models=["ecgmamba_mamba"], noise_types=["bw"], snr_db=[18.0])
+    entry = manifest["entries"][0]
+    _write_complete_outputs(entry)
+    metrics_path = Path(entry["expected_metrics_file"])
+    payload = json.loads(metrics_path.read_text())
+    del payload["noise_metadata"]
+    metrics_path.write_text(json.dumps(payload))
+
+    sweep.mark_resume_statuses(manifest)
+
+    assert entry["status"] == "planned"
+    assert [(item.kind, item.entry["run_name"]) for item in sweep.build_work_items(manifest)] == [
+        ("train_condition", entry["run_name"]),
+    ]
 
 
 def test_completed_run_missing_efficiency_is_scheduled_for_profiling(tmp_path):
