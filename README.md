@@ -13,7 +13,7 @@ data/
   processed/    # gitignored
 runs/           # gitignored
 scripts/
-splits/         # tracked in git
+splits/         
 src/
 tests/
 ```
